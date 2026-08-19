@@ -23,6 +23,7 @@ export type LeagueCategory =
 
 export type WorldEventType =
   | "PLAYER_CREATED"
+  | "PLAYER_CAREER_CHANGED"
   | "PLAYER_MOVED"
   | "PLAYER_RELEASED"
   | "PLAYER_RETIRED"
