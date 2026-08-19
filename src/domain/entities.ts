@@ -1,6 +1,7 @@
 import type {
   EntityId,
   BattingSide,
+  ContractStatus,
   InjurySeverity,
   InjuryStatus,
   ISODate,
@@ -8,6 +9,7 @@ import type {
   ManagerStatus,
   PersonType,
   PlayerStatus,
+  RosterStatus,
   TeamType,
   ThrowingHand,
   WorldEventType,
@@ -30,9 +32,19 @@ export interface League {
 export interface Team {
   id: EntityId;
   leagueId: EntityId;
+  organizationId?: EntityId;
   name: string;
   teamType: TeamType;
   parentTeamId?: EntityId;
+  rosterLevel?: number;
+  rosterLevelName?: string;
+  isTopLevel?: boolean;
+}
+
+export interface Organization {
+  id: EntityId;
+  name: string;
+  countryId: EntityId;
 }
 
 export interface Player {
@@ -56,7 +68,36 @@ export interface Player {
   developmentProfile: PlayerDevelopmentProfile;
   injury: PlayerInjury;
   currentTeamId?: EntityId;
+  currentOrganizationId?: EntityId;
+  currentRosterAssignmentId?: EntityId;
+  rosterStatus?: RosterStatus;
+  firstProfessionalDate?: ISODate;
+  firstTopLevelAppearanceDate?: ISODate;
+  rosterAssignments: RosterAssignment[];
+  contracts: PlayerContract[];
   careerEntries: CareerEntry[];
+}
+
+export interface RosterAssignment {
+  id: EntityId;
+  playerId: EntityId;
+  organizationId: EntityId;
+  teamId: EntityId;
+  rosterStatus: RosterStatus;
+  startDate: ISODate;
+  endDate?: ISODate;
+  reason: string;
+}
+
+export interface PlayerContract {
+  id: EntityId;
+  playerId: EntityId;
+  organizationId: EntityId;
+  startDate: ISODate;
+  endDate: ISODate;
+  salary: number;
+  currency: string;
+  contractStatus: ContractStatus;
 }
 
 export interface BattingRatings {

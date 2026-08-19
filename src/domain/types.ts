@@ -23,6 +23,10 @@ export type InjuryStatus = "HEALTHY" | "INJURED" | "RECOVERING";
 
 export type InjurySeverity = "MINOR" | "MODERATE" | "MAJOR";
 
+export type RosterStatus = "ACTIVE" | "RESERVE" | "INJURED" | "REHAB" | "INACTIVE";
+
+export type ContractStatus = "ACTIVE" | "EXPIRED" | "TERMINATED";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"
@@ -35,6 +39,9 @@ export type WorldEventType =
   | "PLAYER_DECLINED"
   | "PLAYER_INJURED"
   | "PLAYER_RECOVERED"
+  | "PLAYER_ROSTER_ASSIGNED"
+  | "PLAYER_ROSTER_REMOVED"
+  | "PLAYER_CONTRACT_REGISTERED"
   | "PLAYER_CAREER_CHANGED"
   | "PLAYER_MOVED"
   | "PLAYER_RELEASED"

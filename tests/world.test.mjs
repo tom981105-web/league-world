@@ -9,6 +9,7 @@ function createWorld(seed = 2027) {
   );
   world.addCountry({ id: "country_kr", code: "KR", name: "Korea Republic" });
   world.addCountry({ id: "country_pw", code: "PW", name: "Pacific West" });
+  world.addCountry({ id: "country_us", code: "US", name: "United States" });
   world.addLeague({
     id: "league_kr1",
     countryId: "country_kr",
@@ -44,19 +45,65 @@ function createWorld(seed = 2027) {
     level: 1,
     category: "INTERNATIONAL",
   });
-  world.addTeam({ id: "team_seoul", leagueId: "league_kr1", name: "Seoul Falcons", teamType: "CLUB" });
-  world.addTeam({ id: "team_busan", leagueId: "league_kr1", name: "Busan Mariners", teamType: "CLUB" });
+  world.addLeague({ id: "league_us_mlb", countryId: "country_us", name: "Continental Major Baseball", level: 1, category: "PROFESSIONAL" });
+  world.addLeague({ id: "league_us_aaa", countryId: "country_us", name: "Continental Triple A", level: 2, category: "PROFESSIONAL" });
+  world.addLeague({ id: "league_us_aa", countryId: "country_us", name: "Continental Double A", level: 3, category: "PROFESSIONAL" });
+  world.addLeague({ id: "league_us_high_a", countryId: "country_us", name: "Continental High A", level: 4, category: "PROFESSIONAL" });
+  world.addLeague({ id: "league_us_a", countryId: "country_us", name: "Continental A", level: 5, category: "PROFESSIONAL" });
+  world.addLeague({ id: "league_us_rookie", countryId: "country_us", name: "Continental Rookie", level: 6, category: "PROFESSIONAL" });
+  world.addOrganization({ id: "org_seoul", name: "Seoul Falcons Organization", countryId: "country_kr" });
+  world.addOrganization({ id: "org_busan", name: "Busan Mariners Organization", countryId: "country_kr" });
+  world.addOrganization({ id: "org_harbor", name: "Harbor Voyagers Organization", countryId: "country_pw" });
+  world.addOrganization({ id: "org_knights", name: "New York Knights Organization", countryId: "country_us" });
+  world.addTeam({
+    id: "team_seoul",
+    leagueId: "league_kr1",
+    organizationId: "org_seoul",
+    name: "Seoul Falcons",
+    teamType: "CLUB",
+    rosterLevel: 1,
+    rosterLevelName: "1군",
+    isTopLevel: true,
+  });
+  world.addTeam({
+    id: "team_busan",
+    leagueId: "league_kr1",
+    organizationId: "org_busan",
+    name: "Busan Mariners",
+    teamType: "CLUB",
+    rosterLevel: 1,
+    rosterLevelName: "1군",
+    isTopLevel: true,
+  });
   world.addTeam({
     id: "team_seoul_futures",
     leagueId: "league_kr_futures",
+    organizationId: "org_seoul",
     name: "Seoul Falcons Futures",
     teamType: "CLUB",
     parentTeamId: "team_seoul",
+    rosterLevel: 2,
+    rosterLevelName: "Futures",
   });
   world.addTeam({ id: "team_river_high", leagueId: "league_kr_amateur", name: "River High", teamType: "SCHOOL" });
   world.addTeam({ id: "team_hanseong_univ", leagueId: "league_kr_amateur", name: "Hanseong University", teamType: "SCHOOL" });
   world.addTeam({ id: "team_steel_indie", leagueId: "league_kr_independent", name: "Steel Independents", teamType: "CLUB" });
-  world.addTeam({ id: "team_harbor_abroad", leagueId: "league_pw1", name: "Harbor Voyagers", teamType: "CLUB" });
+  world.addTeam({
+    id: "team_harbor_abroad",
+    leagueId: "league_pw1",
+    organizationId: "org_harbor",
+    name: "Harbor Voyagers",
+    teamType: "CLUB",
+    rosterLevel: 1,
+    rosterLevelName: "Top",
+    isTopLevel: true,
+  });
+  world.addTeam({ id: "team_knights_mlb", leagueId: "league_us_mlb", organizationId: "org_knights", name: "New York Knights MLB", teamType: "CLUB", rosterLevel: 1, rosterLevelName: "MLB", isTopLevel: true });
+  world.addTeam({ id: "team_knights_aaa", leagueId: "league_us_aaa", organizationId: "org_knights", name: "New York Knights AAA", teamType: "CLUB", parentTeamId: "team_knights_mlb", rosterLevel: 2, rosterLevelName: "AAA" });
+  world.addTeam({ id: "team_knights_aa", leagueId: "league_us_aa", organizationId: "org_knights", name: "New York Knights AA", teamType: "CLUB", parentTeamId: "team_knights_aaa", rosterLevel: 3, rosterLevelName: "AA" });
+  world.addTeam({ id: "team_knights_high_a", leagueId: "league_us_high_a", organizationId: "org_knights", name: "New York Knights High-A", teamType: "CLUB", parentTeamId: "team_knights_aa", rosterLevel: 4, rosterLevelName: "High-A" });
+  world.addTeam({ id: "team_knights_a", leagueId: "league_us_a", organizationId: "org_knights", name: "New York Knights A", teamType: "CLUB", parentTeamId: "team_knights_high_a", rosterLevel: 5, rosterLevelName: "A" });
+  world.addTeam({ id: "team_knights_rookie", leagueId: "league_us_rookie", organizationId: "org_knights", name: "New York Knights Rookie", teamType: "CLUB", parentTeamId: "team_knights_a", rosterLevel: 6, rosterLevelName: "Rookie" });
   return world;
 }
 
@@ -887,5 +934,262 @@ test("player model invariant catches invalid ratings, age, and injury data", () 
   assert.ok(issues.some((issue) => issue.includes("age")));
   assert.ok(issues.some((issue) => issue.includes("contact")));
   assert.ok(issues.some((issue) => issue.includes("injury days remaining")));
+  assert.throws(() => world.assertInvariants(), /World invariant violation/);
+});
+
+test("organization can group a top team and futures roster", () => {
+  const world = createWorld();
+
+  assert.equal(world.organizations.get("org_seoul")?.name, "Seoul Falcons Organization");
+  assert.equal(world.teams.get("team_seoul")?.organizationId, "org_seoul");
+  assert.equal(world.teams.get("team_seoul_futures")?.organizationId, "org_seoul");
+  assert.equal(world.teams.get("team_seoul_futures")?.parentTeamId, "team_seoul");
+});
+
+test("2군 to 1군 call-up records roster history and event without adding career entries", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({
+    id: "callup_player",
+    status: "PROFESSIONAL",
+  }));
+  world.registerContract({
+    playerId: "callup_player",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 30000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("callup_player", "team_seoul_futures", "ACTIVE", "Futures 개막 로스터 등록");
+  const careerEntriesBefore = world.players.get("callup_player")?.careerEntries.length;
+
+  world.promotePlayer("callup_player", "team_seoul", "1군 콜업");
+
+  const player = world.players.get("callup_player");
+  assert.equal(player?.currentOrganizationId, "org_seoul");
+  assert.equal(player?.currentTeamId, "team_seoul");
+  assert.equal(player?.rosterAssignments.length, 2);
+  assert.equal(player?.rosterAssignments.at(0)?.endDate, "2027-01-01");
+  assert.equal(player?.rosterAssignments.at(-1)?.teamId, "team_seoul");
+  assert.equal(player?.careerEntries.length, careerEntriesBefore);
+  assert.equal(world.events.at(-1)?.type, "PLAYER_PROMOTED");
+});
+
+test("1군 to 2군 demotion is a roster move, not a transfer", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({
+    id: "demotion_player",
+    status: "PROFESSIONAL",
+  }));
+  world.registerContract({
+    playerId: "demotion_player",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 45000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("demotion_player", "team_seoul", "ACTIVE", "1군 로스터 등록");
+
+  world.demotePlayer("demotion_player", "team_seoul_futures", "Futures 말소");
+
+  const player = world.players.get("demotion_player");
+  assert.equal(player?.currentTeamId, "team_seoul_futures");
+  assert.equal(player?.currentOrganizationId, "org_seoul");
+  assert.equal(player?.careerEntries.length, 0);
+  assert.equal(world.events.at(-1)?.type, "PLAYER_DEMOTED");
+});
+
+test("US style multi-level minor roster movement stays inside one organization", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({
+    id: "minor_player",
+    status: "PROFESSIONAL",
+  }));
+  world.registerContract({
+    playerId: "minor_player",
+    organizationId: "org_knights",
+    startDate: "2027-01-01",
+    endDate: "2032-12-31",
+    salary: 90000,
+    currency: "USD",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("minor_player", "team_knights_rookie", "ACTIVE", "Rookie 배치");
+
+  world.promotePlayer("minor_player", "team_knights_a", "A 승격");
+  world.promotePlayer("minor_player", "team_knights_high_a", "High-A 승격");
+  world.promotePlayer("minor_player", "team_knights_aa", "AA 승격");
+  world.promotePlayer("minor_player", "team_knights_aaa", "AAA 승격");
+  world.promotePlayer("minor_player", "team_knights_mlb", "MLB 콜업");
+
+  const player = world.players.get("minor_player");
+  assert.equal(player?.currentOrganizationId, "org_knights");
+  assert.equal(player?.currentTeamId, "team_knights_mlb");
+  assert.equal(player?.rosterAssignments.length, 6);
+  assert.deepEqual(player?.rosterAssignments.map((assignment) => assignment.teamId), [
+    "team_knights_rookie",
+    "team_knights_a",
+    "team_knights_high_a",
+    "team_knights_aa",
+    "team_knights_aaa",
+    "team_knights_mlb",
+  ]);
+});
+
+test("same player cannot have duplicate active roster assignments", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "duplicate_roster", status: "PROFESSIONAL" }));
+  world.registerContract({
+    playerId: "duplicate_roster",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 10000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("duplicate_roster", "team_seoul", "ACTIVE", "1군 등록");
+
+  assert.throws(
+    () => world.assignPlayerToRoster("duplicate_roster", "team_seoul_futures", "RESERVE", "중복 등록"),
+    /already has an active roster assignment/,
+  );
+});
+
+test("retired players cannot be assigned to active rosters", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "retired_roster", status: "AMATEUR" }));
+  world.retirePlayer("retired_roster", "선수 생활 종료");
+
+  assert.throws(
+    () => world.assignPlayerToRoster("retired_roster", "team_seoul", "ACTIVE", "복귀 없이 등록"),
+    /Retired player cannot be assigned/,
+  );
+});
+
+test("roster move cannot bring in a player from another organization", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "other_org_player", status: "PROFESSIONAL" }));
+  world.registerContract({
+    playerId: "other_org_player",
+    organizationId: "org_busan",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 25000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("other_org_player", "team_busan", "ACTIVE", "부산 1군 등록");
+
+  assert.throws(
+    () => world.movePlayerWithinOrganization("other_org_player", "team_seoul", "ACTIVE", "타 조직 로스터 이동 시도"),
+    /cannot cross organizations/,
+  );
+});
+
+test("roster removal closes assignment history and records event", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "remove_roster", status: "PROFESSIONAL" }));
+  world.registerContract({
+    playerId: "remove_roster",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 12000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("remove_roster", "team_seoul", "RESERVE", "예비 명단 등록");
+  world.advanceDays(2, {
+    injuries: false,
+    development: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  world.removePlayerFromRoster("remove_roster", "로스터 제외");
+
+  const player = world.players.get("remove_roster");
+  assert.equal(player?.currentTeamId, undefined);
+  assert.equal(player?.currentOrganizationId, "org_seoul");
+  assert.equal(player?.currentRosterAssignmentId, undefined);
+  assert.equal(player?.rosterAssignments.at(0)?.endDate, "2027-01-03");
+  assert.equal(world.events.at(-1)?.type, "PLAYER_ROSTER_REMOVED");
+});
+
+test("contract registration stores minimal contract data and first professional date", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "contract_player", status: "AMATEUR" }));
+
+  const contract = world.registerContract({
+    playerId: "contract_player",
+    organizationId: "org_seoul",
+    startDate: "2027-02-01",
+    endDate: "2030-01-31",
+    salary: 50000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+
+  const player = world.players.get("contract_player");
+  assert.equal(contract.id, "contract_1");
+  assert.equal(player?.contracts.length, 1);
+  assert.equal(player?.contracts.at(0)?.organizationId, "org_seoul");
+  assert.equal(player?.firstProfessionalDate, "2027-02-01");
+  assert.equal(player?.firstTopLevelAppearanceDate, undefined);
+  assert.equal(world.events.at(-1)?.type, "PLAYER_CONTRACT_REGISTERED");
+});
+
+test("current team and organization invariant catches roster contradictions", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "bad_roster_state", status: "PROFESSIONAL" }));
+  world.registerContract({
+    playerId: "bad_roster_state",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 15000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("bad_roster_state", "team_seoul", "ACTIVE", "1군 등록");
+
+  const player = world.players.get("bad_roster_state");
+  player.currentOrganizationId = "org_busan";
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("current team organization")));
+  assert.ok(issues.some((issue) => issue.includes("currentOrganizationId does not match open roster assignment")));
+  assert.throws(() => world.assertInvariants(), /World invariant violation/);
+});
+
+test("injury and roster status contradictions are caught by invariants", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({ id: "injury_roster_mismatch", status: "PROFESSIONAL" }));
+  world.registerContract({
+    playerId: "injury_roster_mismatch",
+    organizationId: "org_seoul",
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    salary: 18000000,
+    currency: "KRW",
+    contractStatus: "ACTIVE",
+  });
+  world.assignPlayerToRoster("injury_roster_mismatch", "team_seoul", "ACTIVE", "1군 등록");
+
+  const player = world.players.get("injury_roster_mismatch");
+  player.injury = {
+    status: "INJURED",
+    severity: "MODERATE",
+    expectedRecoveryDays: 30,
+    daysRemaining: 30,
+    startedOn: "2027-01-01",
+  };
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("is injured but rosterStatus is ACTIVE")));
   assert.throws(() => world.assertInvariants(), /World invariant violation/);
 });

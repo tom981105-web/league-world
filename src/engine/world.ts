@@ -3,9 +3,12 @@ import type {
   Country,
   League,
   Manager,
+  Organization,
+  PlayerContract,
   PlayerDevelopmentProfile,
   PlayerInjury,
   Player,
+  RosterAssignment,
   Team,
   WorldEvent,
 } from "../domain/entities.js";
@@ -14,6 +17,7 @@ import type {
   InjurySeverity,
   ISODate,
   PersonType,
+  RosterStatus,
   WorldEventType,
 } from "../domain/types.js";
 import {
@@ -37,6 +41,11 @@ type PlayerInput = Omit<
   | "pitchingRatings"
   | "developmentProfile"
   | "injury"
+  | "currentOrganizationId"
+  | "currentRosterAssignmentId"
+  | "rosterStatus"
+  | "rosterAssignments"
+  | "contracts"
   | "careerEntries"
 > &
   Partial<
@@ -51,10 +60,16 @@ type PlayerInput = Omit<
       | "pitchingRatings"
       | "developmentProfile"
       | "injury"
+      | "currentOrganizationId"
+      | "currentRosterAssignmentId"
+      | "rosterStatus"
+      | "rosterAssignments"
+      | "contracts"
       | "careerEntries"
     >
   >;
 type ManagerInput = Omit<Manager, "careerEntries"> & Partial<Pick<Manager, "careerEntries">>;
+type PlayerContractInput = Omit<PlayerContract, "id"> & Partial<Pick<PlayerContract, "id">>;
 
 export interface AdvanceWorldOptions {
   playerCareerOptions?: (player: Readonly<Player>, world: LeagueWorld) => CareerOption[];
@@ -67,6 +82,7 @@ export interface AdvanceWorldOptions {
 export class LeagueWorld {
   readonly countries = new Map<EntityId, Country>();
   readonly leagues = new Map<EntityId, League>();
+  readonly organizations = new Map<EntityId, Organization>();
   readonly players = new Map<EntityId, Player>();
   readonly managers = new Map<EntityId, Manager>();
   readonly teams = new Map<EntityId, Team>();
@@ -87,15 +103,32 @@ export class LeagueWorld {
     this.leagues.set(league.id, structuredClone(league));
   }
 
+  addOrganization(organization: Organization): void {
+    this.requireCountry(organization.countryId);
+    this.organizations.set(organization.id, structuredClone(organization));
+  }
+
   addTeam(team: Team): void {
     this.requireLeague(team.leagueId);
-    if (team.parentTeamId) this.requireTeam(team.parentTeamId);
+    if (team.organizationId) this.requireOrganization(team.organizationId);
+    if (team.parentTeamId) {
+      const parentTeam = this.requireTeam(team.parentTeamId);
+      if (parentTeam.organizationId && team.organizationId && parentTeam.organizationId !== team.organizationId) {
+        throw new Error(`Parent team belongs to another organization: ${parentTeam.organizationId}`);
+      }
+    }
     this.teams.set(team.id, structuredClone(team));
   }
 
   addPlayer(player: PlayerInput): void {
-    if (player.currentTeamId) this.requireTeam(player.currentTeamId);
+    const currentTeam = player.currentTeamId ? this.requireTeam(player.currentTeamId) : undefined;
     const stored = this.normalizePlayerInput(player);
+    if (currentTeam?.organizationId) {
+      if (stored.currentOrganizationId && stored.currentOrganizationId !== currentTeam.organizationId) {
+        throw new Error(`Player currentOrganizationId does not match currentTeamId: ${stored.id}`);
+      }
+      stored.currentOrganizationId = currentTeam.organizationId;
+    }
     this.players.set(player.id, stored);
     if (stored.currentTeamId) {
       this.startCareerEntry(stored, "PLAYER", {
@@ -134,9 +167,16 @@ export class LeagueWorld {
 
   movePlayer(playerId: EntityId, toTeamId: EntityId, reason: string): void {
     const player = this.requirePlayer(playerId);
-    this.requireTeam(toTeamId);
+    const toTeam = this.requireTeam(toTeamId);
     const fromTeamId = player.currentTeamId;
+    const fromOrganizationId = player.currentOrganizationId;
+    this.closeOpenRosterAssignment(player, reason);
     player.currentTeamId = toTeamId;
+    if (toTeam.organizationId) {
+      player.currentOrganizationId = toTeam.organizationId;
+    } else {
+      delete player.currentOrganizationId;
+    }
     player.status = "PROFESSIONAL";
     this.replaceCareerEntry(player, "PLAYER", {
       teamId: toTeamId,
@@ -148,14 +188,17 @@ export class LeagueWorld {
       subjectId: player.id,
       teamId: toTeamId,
       reason,
-      payload: { fromTeamId, toTeamId },
+      payload: { fromTeamId, toTeamId, fromOrganizationId, toOrganizationId: toTeam.organizationId },
     });
   }
 
   releasePlayer(playerId: EntityId, reason: string): void {
     const player = this.requirePlayer(playerId);
     const fromTeamId = player.currentTeamId;
+    const fromOrganizationId = player.currentOrganizationId;
+    this.closeOpenRosterAssignment(player, reason);
     delete player.currentTeamId;
+    delete player.currentOrganizationId;
     player.status = "FREE_AGENT";
     this.replaceCareerEntry(player, "PLAYER", {
       role: player.primaryPosition,
@@ -166,14 +209,17 @@ export class LeagueWorld {
     this.record("PLAYER_RELEASED", {
       subjectId: player.id,
       reason,
-      payload: { fromTeamId },
+      payload: { fromTeamId, fromOrganizationId },
     });
   }
 
   retirePlayer(playerId: EntityId, reason: string): void {
     const player = this.requirePlayer(playerId);
     const fromTeamId = player.currentTeamId;
+    const fromOrganizationId = player.currentOrganizationId;
+    this.closeOpenRosterAssignment(player, reason);
     delete player.currentTeamId;
+    delete player.currentOrganizationId;
     player.status = "RETIRED";
     this.replaceCareerEntry(player, "PLAYER", {
       role: player.primaryPosition,
@@ -184,8 +230,153 @@ export class LeagueWorld {
     this.record("PLAYER_RETIRED", {
       subjectId: player.id,
       reason,
-      payload: { fromTeamId },
+      payload: { fromTeamId, fromOrganizationId },
     });
+  }
+
+  registerContract(contract: PlayerContractInput): PlayerContract {
+    const player = this.requirePlayer(contract.playerId);
+    this.requireOrganization(contract.organizationId);
+    if (player.status === "RETIRED") {
+      throw new Error(`Retired player cannot sign a contract: ${player.id}`);
+    }
+    if (contract.endDate < contract.startDate) {
+      throw new Error("Contract endDate must be >= startDate");
+    }
+    if (!Number.isFinite(contract.salary) || contract.salary < 0) {
+      throw new Error("Contract salary must be a non-negative number");
+    }
+
+    const stored: PlayerContract = {
+      ...structuredClone(contract),
+      id: contract.id ?? this.ids.nextId("contract"),
+    };
+    player.contracts.push(stored);
+    if (stored.contractStatus === "ACTIVE") {
+      if (player.currentOrganizationId && player.currentOrganizationId !== stored.organizationId) {
+        throw new Error(`Player already belongs to another organization: ${player.currentOrganizationId}`);
+      }
+      player.currentOrganizationId = stored.organizationId;
+      player.status = "PROFESSIONAL";
+      player.firstProfessionalDate ??= stored.startDate;
+    }
+    this.record("PLAYER_CONTRACT_REGISTERED", {
+      subjectId: player.id,
+      reason: "계약 등록",
+      payload: { ...stored },
+    });
+    this.assertInvariants();
+    return structuredClone(stored);
+  }
+
+  assignPlayerToRoster(
+    playerId: EntityId,
+    teamId: EntityId,
+    rosterStatus: RosterStatus,
+    reason: string,
+  ): RosterAssignment {
+    const player = this.requirePlayer(playerId);
+    const team = this.requireTeam(teamId);
+    const organizationId = this.requireTeamOrganization(team);
+    if (player.status === "RETIRED") {
+      throw new Error(`Retired player cannot be assigned to a roster: ${player.id}`);
+    }
+    if (player.currentRosterAssignmentId) {
+      throw new Error(`Player already has an active roster assignment: ${player.id}`);
+    }
+    this.assertRosterStatusCompatibleWithInjury(player, rosterStatus);
+    if (player.currentOrganizationId && player.currentOrganizationId !== organizationId) {
+      throw new Error(`Player belongs to another organization: ${player.currentOrganizationId}`);
+    }
+
+    player.currentOrganizationId = organizationId;
+    player.currentTeamId = team.id;
+    player.rosterStatus = rosterStatus;
+    player.status = "PROFESSIONAL";
+    player.firstProfessionalDate ??= this.clock.now();
+
+    const assignment = this.startRosterAssignment(player, team, rosterStatus, reason);
+    this.record("PLAYER_ROSTER_ASSIGNED", {
+      subjectId: player.id,
+      teamId: team.id,
+      reason,
+      payload: {
+        assignmentId: assignment.id,
+        organizationId,
+        rosterStatus,
+      },
+    });
+    this.assertInvariants();
+    return structuredClone(assignment);
+  }
+
+  promotePlayer(playerId: EntityId, toTeamId: EntityId, reason: string): RosterAssignment {
+    return this.movePlayerWithinOrganization(playerId, toTeamId, "ACTIVE", reason, "PLAYER_PROMOTED");
+  }
+
+  demotePlayer(playerId: EntityId, toTeamId: EntityId, reason: string): RosterAssignment {
+    return this.movePlayerWithinOrganization(playerId, toTeamId, "ACTIVE", reason, "PLAYER_DEMOTED");
+  }
+
+  movePlayerWithinOrganization(
+    playerId: EntityId,
+    toTeamId: EntityId,
+    rosterStatus: RosterStatus,
+    reason: string,
+    eventType?: Extract<WorldEventType, "PLAYER_PROMOTED" | "PLAYER_DEMOTED" | "PLAYER_ROSTER_ASSIGNED">,
+  ): RosterAssignment {
+    const player = this.requirePlayer(playerId);
+    const toTeam = this.requireTeam(toTeamId);
+    const toOrganizationId = this.requireTeamOrganization(toTeam);
+    if (player.status === "RETIRED") {
+      throw new Error(`Retired player cannot move rosters: ${player.id}`);
+    }
+    if (!player.currentOrganizationId) {
+      throw new Error(`Player is not assigned to an organization: ${player.id}`);
+    }
+    if (player.currentOrganizationId !== toOrganizationId) {
+      throw new Error(`Roster moves cannot cross organizations: ${player.currentOrganizationId} -> ${toOrganizationId}`);
+    }
+    this.assertRosterStatusCompatibleWithInjury(player, rosterStatus);
+
+    const fromTeamId = player.currentTeamId;
+    const previousAssignmentId = player.currentRosterAssignmentId;
+    this.closeOpenRosterAssignment(player, reason);
+    player.currentTeamId = toTeam.id;
+    player.rosterStatus = rosterStatus;
+    const assignment = this.startRosterAssignment(player, toTeam, rosterStatus, reason);
+    this.record(eventType ?? this.inferRosterMoveEventType(fromTeamId, toTeam), {
+      subjectId: player.id,
+      teamId: toTeam.id,
+      reason,
+      payload: {
+        fromTeamId,
+        toTeamId: toTeam.id,
+        organizationId: toOrganizationId,
+        previousAssignmentId,
+        assignmentId: assignment.id,
+        rosterStatus,
+      },
+    });
+    this.assertInvariants();
+    return structuredClone(assignment);
+  }
+
+  removePlayerFromRoster(playerId: EntityId, reason: string): void {
+    const player = this.requirePlayer(playerId);
+    const fromTeamId = player.currentTeamId;
+    const fromOrganizationId = player.currentOrganizationId;
+    const previousAssignmentId = player.currentRosterAssignmentId;
+    this.closeOpenRosterAssignment(player, reason);
+    delete player.currentTeamId;
+    delete player.rosterStatus;
+    this.record("PLAYER_ROSTER_REMOVED", {
+      subjectId: player.id,
+      ...(fromTeamId ? { teamId: fromTeamId } : {}),
+      reason,
+      payload: { fromTeamId, organizationId: fromOrganizationId, previousAssignmentId },
+    });
+    this.assertInvariants();
   }
 
   hireManager(managerId: EntityId, teamId: EntityId, reason: string): void {
@@ -282,11 +473,19 @@ export class LeagueWorld {
 
     player.status = option.nextStatus;
     if (toTeamId) {
+      const toTeam = this.requireTeam(toTeamId);
       player.currentTeamId = toTeamId;
+      if (toTeam.organizationId) {
+        player.currentOrganizationId = toTeam.organizationId;
+      } else {
+        delete player.currentOrganizationId;
+      }
     } else if (option.nextStatus === "FREE_AGENT") {
       delete player.currentTeamId;
+      delete player.currentOrganizationId;
     } else if (option.nextStatus === "INDEPENDENT" || option.nextStatus === "AMATEUR") {
       delete player.currentTeamId;
+      delete player.currentOrganizationId;
     }
 
     this.replaceCareerEntry(player, "PLAYER", {
@@ -338,12 +537,50 @@ export class LeagueWorld {
       if (player.currentTeamId && !this.teams.has(player.currentTeamId)) {
         issues.push(`Player ${player.id} has missing team ${player.currentTeamId}`);
       }
-      if (player.status === "PROFESSIONAL" && !player.currentTeamId) {
-        issues.push(`Player ${player.id} is professional without a current team`);
+      if (player.status === "PROFESSIONAL" && !player.currentTeamId && !player.currentOrganizationId) {
+        issues.push(`Player ${player.id} is professional without a current team or organization`);
       }
       if ((player.status === "FREE_AGENT" || player.status === "RETIRED") && player.currentTeamId) {
         issues.push(`Player ${player.id} is ${player.status} but has a current team`);
       }
+      if (player.currentTeamId) {
+        const team = this.teams.get(player.currentTeamId);
+        if (team?.organizationId !== player.currentOrganizationId) {
+          issues.push(`Player ${player.id} current team organization does not match currentOrganizationId`);
+        }
+      }
+      if (player.currentRosterAssignmentId) {
+        const openAssignments = player.rosterAssignments.filter((assignment) => !assignment.endDate);
+        if (openAssignments.length !== 1) {
+          issues.push(`Player ${player.id} must have exactly one open roster assignment`);
+        }
+        const open = openAssignments[0];
+        if (open) {
+          if (open.id !== player.currentRosterAssignmentId) {
+            issues.push(`Player ${player.id} currentRosterAssignmentId does not match open assignment`);
+          }
+          if (open.teamId !== player.currentTeamId) {
+            issues.push(`Player ${player.id} currentTeamId does not match open roster assignment`);
+          }
+          if (open.organizationId !== player.currentOrganizationId) {
+            issues.push(`Player ${player.id} currentOrganizationId does not match open roster assignment`);
+          }
+          if (open.rosterStatus !== player.rosterStatus) {
+            issues.push(`Player ${player.id} rosterStatus does not match open roster assignment`);
+          }
+        }
+      } else if (player.rosterAssignments.some((assignment) => !assignment.endDate)) {
+        issues.push(`Player ${player.id} has an open roster assignment but no currentRosterAssignmentId`);
+      }
+      if (player.rosterStatus && !player.currentRosterAssignmentId) {
+        issues.push(`Player ${player.id} has rosterStatus without an active roster assignment`);
+      }
+      if (player.status === "RETIRED" && player.currentRosterAssignmentId) {
+        issues.push(`Player ${player.id} is retired with an active roster assignment`);
+      }
+      this.validatePlayerRosterAssignments(player, issues);
+      this.validatePlayerContracts(player, issues);
+      this.validateRosterInjuryConsistency(player, issues);
     }
 
     for (const manager of this.managers.values()) {
@@ -406,6 +643,9 @@ export class LeagueWorld {
             };
           } else {
             player.injury = { status: "HEALTHY" };
+            if (player.rosterStatus === "INJURED") {
+              this.updateOpenRosterStatus(player, "REHAB");
+            }
             this.record("PLAYER_RECOVERED", {
               subjectId: player.id,
               ...(player.currentTeamId ? { teamId: player.currentTeamId } : {}),
@@ -522,6 +762,9 @@ export class LeagueWorld {
       daysRemaining: expectedRecoveryDays,
       startedOn: this.clock.now(),
     };
+    if (player.currentRosterAssignmentId) {
+      this.updateOpenRosterStatus(player, "INJURED");
+    }
     this.record("PLAYER_INJURED", {
       subjectId: player.id,
       ...(player.currentTeamId ? { teamId: player.currentTeamId } : {}),
@@ -657,6 +900,8 @@ export class LeagueWorld {
       pitchingRatings: this.normalizePitchingRatings(player.pitchingRatings, currentAbility),
       developmentProfile: this.normalizeDevelopmentProfile(player.developmentProfile),
       injury: structuredClone(player.injury ?? { status: "HEALTHY" }),
+      rosterAssignments: structuredClone(player.rosterAssignments ?? []),
+      contracts: structuredClone(player.contracts ?? []),
       careerEntries: structuredClone(player.careerEntries ?? []),
     };
     normalized.age = this.calculateAge(normalized.birthDate);
@@ -810,6 +1055,82 @@ export class LeagueWorld {
     });
   }
 
+  private startRosterAssignment(
+    player: Player,
+    team: Team,
+    rosterStatus: RosterStatus,
+    reason: string,
+  ): RosterAssignment {
+    const organizationId = this.requireTeamOrganization(team);
+    const assignment: RosterAssignment = {
+      id: this.ids.nextId("assign"),
+      playerId: player.id,
+      organizationId,
+      teamId: team.id,
+      rosterStatus,
+      startDate: this.clock.now(),
+      reason,
+    };
+    player.rosterAssignments.push(assignment);
+    player.currentRosterAssignmentId = assignment.id;
+    return assignment;
+  }
+
+  private closeOpenRosterAssignment(player: Player, reason: string): void {
+    if (!player.currentRosterAssignmentId) return;
+    const assignment = player.rosterAssignments.find(
+      (candidate) => candidate.id === player.currentRosterAssignmentId && !candidate.endDate,
+    );
+    if (assignment) {
+      assignment.endDate = this.clock.now();
+      assignment.reason = `${assignment.reason}; ended: ${reason}`;
+    }
+    delete player.currentRosterAssignmentId;
+    delete player.rosterStatus;
+  }
+
+  private updateOpenRosterStatus(player: Player, rosterStatus: RosterStatus): void {
+    if (!player.currentRosterAssignmentId) return;
+    const assignment = player.rosterAssignments.find(
+      (candidate) => candidate.id === player.currentRosterAssignmentId && !candidate.endDate,
+    );
+    if (assignment) {
+      assignment.rosterStatus = rosterStatus;
+      player.rosterStatus = rosterStatus;
+    }
+  }
+
+  private requireTeamOrganization(team: Team): EntityId {
+    if (!team.organizationId) {
+      throw new Error(`Team is not linked to an organization: ${team.id}`);
+    }
+    this.requireOrganization(team.organizationId);
+    return team.organizationId;
+  }
+
+  private assertRosterStatusCompatibleWithInjury(player: Player, rosterStatus: RosterStatus): void {
+    if (player.injury.status === "INJURED" && rosterStatus !== "INJURED") {
+      throw new Error(`Injured player must use INJURED roster status: ${player.id}`);
+    }
+    if (player.injury.status === "RECOVERING" && rosterStatus !== "REHAB" && rosterStatus !== "INJURED") {
+      throw new Error(`Recovering player must use REHAB or INJURED roster status: ${player.id}`);
+    }
+    if (player.injury.status === "HEALTHY" && rosterStatus === "INJURED") {
+      throw new Error(`Healthy player cannot use INJURED roster status: ${player.id}`);
+    }
+  }
+
+  private inferRosterMoveEventType(
+    fromTeamId: EntityId | undefined,
+    toTeam: Team,
+  ): Extract<WorldEventType, "PLAYER_PROMOTED" | "PLAYER_DEMOTED" | "PLAYER_ROSTER_ASSIGNED"> {
+    if (!fromTeamId) return "PLAYER_ROSTER_ASSIGNED";
+    const fromTeam = this.requireTeam(fromTeamId);
+    if ((toTeam.rosterLevel ?? 0) < (fromTeam.rosterLevel ?? 0)) return "PLAYER_PROMOTED";
+    if ((toTeam.rosterLevel ?? 0) > (fromTeam.rosterLevel ?? 0)) return "PLAYER_DEMOTED";
+    return "PLAYER_ROSTER_ASSIGNED";
+  }
+
   private inferPlayerEventType(fromTeamId: EntityId | undefined, player: Player): WorldEventType {
     if (player.status === "FREE_AGENT") return "PLAYER_RELEASED";
     if (player.status === "RETIRED") return "PLAYER_RETIRED";
@@ -857,7 +1178,7 @@ export class LeagueWorld {
         if (entry.status !== status) {
           issues.push(`Open career entry ${entry.id} status ${entry.status} does not match ${status}`);
         }
-        if (entry.teamId !== currentTeamId) {
+        if (!this.isCareerTeamCompatibleWithCurrentTeam(entry.teamId, currentTeamId, personType)) {
           issues.push(`Open career entry ${entry.id} team ${entry.teamId} does not match ${currentTeamId}`);
         }
       }
@@ -940,6 +1261,73 @@ export class LeagueWorld {
     }
   }
 
+  private isCareerTeamCompatibleWithCurrentTeam(
+    careerTeamId: EntityId | undefined,
+    currentTeamId: EntityId | undefined,
+    personType: PersonType,
+  ): boolean {
+    if (careerTeamId === currentTeamId) return true;
+    if (personType === "MANAGER") return false;
+    if (!careerTeamId || !currentTeamId) return false;
+    const careerTeam = this.teams.get(careerTeamId);
+    const currentTeam = this.teams.get(currentTeamId);
+    return !!careerTeam?.organizationId && careerTeam.organizationId === currentTeam?.organizationId;
+  }
+
+  private validatePlayerContracts(player: Player, issues: string[]): void {
+    for (const contract of player.contracts) {
+      if (contract.playerId !== player.id) {
+        issues.push(`Contract ${contract.id} points to ${contract.playerId}, expected ${player.id}`);
+      }
+      if (!this.organizations.has(contract.organizationId)) {
+        issues.push(`Contract ${contract.id} has missing organization ${contract.organizationId}`);
+      }
+      if (contract.endDate < contract.startDate) {
+        issues.push(`Contract ${contract.id} endDate is before startDate`);
+      }
+      if (!Number.isFinite(contract.salary) || contract.salary < 0) {
+        issues.push(`Contract ${contract.id} salary must be non-negative`);
+      }
+      if (!contract.currency) {
+        issues.push(`Contract ${contract.id} must have currency`);
+      }
+    }
+  }
+
+  private validatePlayerRosterAssignments(player: Player, issues: string[]): void {
+    for (const assignment of player.rosterAssignments) {
+      if (assignment.playerId !== player.id) {
+        issues.push(`Roster assignment ${assignment.id} points to ${assignment.playerId}, expected ${player.id}`);
+      }
+      const team = this.teams.get(assignment.teamId);
+      if (!team) {
+        issues.push(`Roster assignment ${assignment.id} has missing team ${assignment.teamId}`);
+      }
+      if (!this.organizations.has(assignment.organizationId)) {
+        issues.push(`Roster assignment ${assignment.id} has missing organization ${assignment.organizationId}`);
+      }
+      if (team?.organizationId !== assignment.organizationId) {
+        issues.push(`Roster assignment ${assignment.id} team organization does not match assignment organization`);
+      }
+      if (assignment.endDate && assignment.endDate < assignment.startDate) {
+        issues.push(`Roster assignment ${assignment.id} endDate is before startDate`);
+      }
+    }
+  }
+
+  private validateRosterInjuryConsistency(player: Player, issues: string[]): void {
+    if (!player.rosterStatus) return;
+    if (player.injury.status === "INJURED" && player.rosterStatus !== "INJURED") {
+      issues.push(`Player ${player.id} is injured but rosterStatus is ${player.rosterStatus}`);
+    }
+    if (player.injury.status === "RECOVERING" && player.rosterStatus !== "REHAB" && player.rosterStatus !== "INJURED") {
+      issues.push(`Player ${player.id} is recovering but rosterStatus is ${player.rosterStatus}`);
+    }
+    if (player.injury.status === "HEALTHY" && player.rosterStatus === "INJURED") {
+      issues.push(`Player ${player.id} is healthy but rosterStatus is INJURED`);
+    }
+  }
+
   private validateRating(value: number, label: string, issues: string[]): void {
     if (!Number.isFinite(value) || value < 0 || value > 100) {
       issues.push(`${label} must be between 0 and 100`);
@@ -992,6 +1380,12 @@ export class LeagueWorld {
   private requireLeague(id: EntityId): League {
     const value = this.leagues.get(id);
     if (!value) throw new Error(`League not found: ${id}`);
+    return value;
+  }
+
+  private requireOrganization(id: EntityId): Organization {
+    const value = this.organizations.get(id);
+    if (!value) throw new Error(`Organization not found: ${id}`);
     return value;
   }
 
