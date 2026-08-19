@@ -149,6 +149,32 @@ function createPlayer(overrides = {}) {
   };
 }
 
+function createRegularSeason(world, overrides = {}) {
+  const season = world.createSeason({
+    id: "season_kr_2027",
+    leagueId: "league_kr1",
+    year: 2027,
+    name: "2027 Korea Premier Baseball",
+    startDate: "2027-01-02",
+    regularSeasonEndDate: "2027-10-01",
+    postseasonEndDate: "2027-11-01",
+    allowDraws: true,
+    hasPostseason: true,
+    ...overrides,
+  });
+  const competition = world.createCompetition({
+    id: "competition_kr_regular_2027",
+    seasonId: season.id,
+    leagueId: season.leagueId,
+    name: "2027 Korea Premier Regular Season",
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: ["team_seoul", "team_busan"],
+  });
+  return { season, competition };
+}
+
 test("countries and leagues are owned by the world before teams are added", () => {
   const world = createWorld();
 
@@ -1192,4 +1218,218 @@ test("injury and roster status contradictions are caught by invariants", () => {
   const issues = world.validateInvariants();
   assert.ok(issues.some((issue) => issue.includes("is injured but rosterStatus is ACTIVE")));
   assert.throws(() => world.assertInvariants(), /World invariant violation/);
+});
+
+test("season creation stores league year calendar and initial standings", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+
+  assert.equal(season.status, "PRESEASON");
+  assert.equal(season.allowDraws, true);
+  assert.equal(season.hasPostseason, true);
+  assert.equal(world.seasons.get(season.id)?.leagueId, "league_kr1");
+  assert.equal(world.competitions.get(competition.id)?.type, "REGULAR_SEASON");
+  assert.deepEqual(world.getStandings(season.id).map((record) => record.teamId).sort(), [
+    "team_busan",
+    "team_seoul",
+  ]);
+});
+
+test("duplicate season for the same league and year is rejected", () => {
+  const world = createWorld();
+  createRegularSeason(world);
+
+  assert.throws(
+    () => world.createSeason({
+      leagueId: "league_kr1",
+      year: 2027,
+      name: "Duplicate 2027 Season",
+      startDate: "2027-03-01",
+      regularSeasonEndDate: "2027-09-01",
+    }),
+    /Season already exists/,
+  );
+});
+
+test("round-robin schedule generation creates balanced home and away fixtures", () => {
+  const world = createWorld(3);
+  const season = world.createSeason({
+    id: "season_rr_2027",
+    leagueId: "league_kr1",
+    year: 2027,
+    name: "Round Robin Test",
+    startDate: "2027-01-02",
+    regularSeasonEndDate: "2027-02-28",
+    allowDraws: true,
+  });
+  const competition = world.createCompetition({
+    id: "competition_rr_2027",
+    seasonId: season.id,
+    leagueId: season.leagueId,
+    name: "Round Robin Regular Season",
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: ["team_seoul", "team_busan"],
+  });
+
+  const fixtures = world.generateRoundRobinSchedule({
+    seasonId: season.id,
+    competitionId: competition.id,
+    teamIds: ["team_seoul", "team_busan"],
+    gamesPerOpponent: 4,
+    startDate: "2027-01-02",
+  });
+  const homeCounts = fixtures.reduce((counts, game) => {
+    counts[game.homeTeamId] = (counts[game.homeTeamId] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  assert.equal(fixtures.length, 4);
+  assert.equal(homeCounts.team_seoul, 2);
+  assert.equal(homeCounts.team_busan, 2);
+  assert.ok(fixtures.every((game) => game.status === "SCHEDULED"));
+});
+
+test("same team cannot be scheduled for two games on the same date", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-01",
+  });
+
+  assert.throws(
+    () => world.scheduleGame({
+      seasonId: season.id,
+      competitionId: competition.id,
+      homeTeamId: "team_busan",
+      awayTeamId: "team_seoul",
+      scheduledDate: "2027-04-01",
+    }),
+    /already has a game/,
+  );
+});
+
+test("game result input completes fixture and updates standings", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  const game = world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-02",
+    venue: "Falcons Park",
+  });
+
+  const completed = world.recordGameResult(game.id, { homeScore: 5, awayScore: 3 });
+  const standings = world.getStandings(season.id);
+  const seoul = standings.find((record) => record.teamId === "team_seoul");
+  const busan = standings.find((record) => record.teamId === "team_busan");
+
+  assert.equal(completed.status, "COMPLETED");
+  assert.deepEqual(completed.result, { homeScore: 5, awayScore: 3 });
+  assert.equal(seoul?.wins, 1);
+  assert.equal(seoul?.winningPercentage, 1);
+  assert.equal(busan?.losses, 1);
+  assert.equal(busan?.gamesBehind, 1);
+  assert.equal(world.events.at(-1)?.type, "GAME_COMPLETED");
+});
+
+test("draw results are supported when the season allows draws", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  const game = world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-03",
+  });
+
+  world.completeGame(game.id, { homeScore: 2, awayScore: 2 });
+  const standings = world.getStandings(season.id);
+
+  assert.equal(standings.find((record) => record.teamId === "team_seoul")?.draws, 1);
+  assert.equal(standings.find((record) => record.teamId === "team_busan")?.winningPercentage, 0.5);
+});
+
+test("season status advances with WorldClock dates", () => {
+  const world = createWorld();
+  const { season } = createRegularSeason(world, {
+    id: "season_short",
+    year: 2028,
+    startDate: "2027-01-02",
+    regularSeasonEndDate: "2027-01-03",
+    postseasonEndDate: "2027-01-05",
+  });
+
+  world.advanceDay({ injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  assert.equal(world.seasons.get(season.id)?.status, "REGULAR_SEASON");
+  world.advanceDays(2, { injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  assert.equal(world.seasons.get(season.id)?.status, "POSTSEASON");
+  world.advanceDays(2, { injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  assert.equal(world.seasons.get(season.id)?.status, "COMPLETED");
+  assert.ok(world.events.some((event) => event.type === "SEASON_STARTED"));
+  assert.ok(world.events.some((event) => event.type === "REGULAR_SEASON_ENDED"));
+  assert.ok(world.events.some((event) => event.type === "POSTSEASON_STARTED"));
+  assert.ok(world.events.some((event) => event.type === "SEASON_COMPLETED"));
+});
+
+test("round-robin schedule is reproducible with the same seed", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    const { season, competition } = createRegularSeason(world);
+    return world.generateRoundRobinSchedule({
+      seasonId: season.id,
+      competitionId: competition.id,
+      teamIds: ["team_seoul", "team_busan"],
+      gamesPerOpponent: 6,
+      startDate: "2027-03-01",
+      restDaysBetweenRounds: 1,
+    });
+  }
+
+  assert.deepEqual(run(777), run(777));
+});
+
+test("schedule and standings invariants catch invalid local mutations", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  const game = world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-04",
+  });
+  world.completeGame(game.id, { homeScore: 8, awayScore: 4 });
+
+  world.games.get(game.id).awayTeamId = "team_seoul";
+  world.getStandings(season.id);
+  world.standings.get(season.id).get("team_seoul").wins = 99;
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("same home and away")));
+  assert.ok(issues.some((issue) => issue.includes("do not match completed games")));
+  assert.throws(() => world.assertInvariants(), /World invariant violation/);
+});
+
+test("completed games cannot be completed twice", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  const game = world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-05",
+  });
+  world.completeGame(game.id, { homeScore: 1, awayScore: 0 });
+
+  assert.throws(() => world.completeGame(game.id, { homeScore: 2, awayScore: 0 }), /already completed/);
 });

@@ -27,6 +27,17 @@ export type RosterStatus = "ACTIVE" | "RESERVE" | "INJURED" | "REHAB" | "INACTIV
 
 export type ContractStatus = "ACTIVE" | "EXPIRED" | "TERMINATED";
 
+export type SeasonStatus = "PRESEASON" | "REGULAR_SEASON" | "POSTSEASON" | "COMPLETED";
+
+export type CompetitionType =
+  | "REGULAR_SEASON"
+  | "POSTSEASON"
+  | "TOURNAMENT"
+  | "CUP"
+  | "INTERNATIONAL";
+
+export type GameStatus = "SCHEDULED" | "COMPLETED" | "POSTPONED" | "CANCELLED";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"
@@ -53,6 +64,11 @@ export type WorldEventType =
   | "MANAGER_MOVED"
   | "MANAGER_FIRED"
   | "MANAGER_RETIRED"
+  | "REGULAR_SEASON_ENDED"
+  | "POSTSEASON_STARTED"
+  | "SEASON_COMPLETED"
+  | "GAME_POSTPONED"
+  | "GAME_COMPLETED"
   | "SEASON_STARTED"
   | "SEASON_ENDED"
   | "GAME_PLAYED";

@@ -1,6 +1,9 @@
 import type {
   CareerEntry,
+  Competition,
   Country,
+  GameFixture,
+  GameResult,
   League,
   Manager,
   Organization,
@@ -9,11 +12,15 @@ import type {
   PlayerInjury,
   Player,
   RosterAssignment,
+  Season,
+  StandingRecord,
   Team,
   WorldEvent,
 } from "../domain/entities.js";
 import type {
+  CompetitionType,
   EntityId,
+  GameStatus,
   InjurySeverity,
   ISODate,
   PersonType,
@@ -70,6 +77,21 @@ type PlayerInput = Omit<
   >;
 type ManagerInput = Omit<Manager, "careerEntries"> & Partial<Pick<Manager, "careerEntries">>;
 type PlayerContractInput = Omit<PlayerContract, "id"> & Partial<Pick<PlayerContract, "id">>;
+type SeasonInput = Omit<Season, "id" | "status" | "allowDraws" | "hasPostseason"> &
+  Partial<Pick<Season, "id" | "status" | "allowDraws" | "hasPostseason">>;
+type CompetitionInput = Omit<Competition, "id"> & Partial<Pick<Competition, "id">>;
+type GameFixtureInput = Omit<GameFixture, "id" | "status"> &
+  Partial<Pick<GameFixture, "id" | "status">>;
+
+export interface RoundRobinScheduleOptions {
+  seasonId: EntityId;
+  competitionId: EntityId;
+  teamIds: EntityId[];
+  gamesPerOpponent: number;
+  startDate: ISODate;
+  restDaysBetweenRounds?: number;
+  venueByHomeTeamId?: Record<string, string>;
+}
 
 export interface AdvanceWorldOptions {
   playerCareerOptions?: (player: Readonly<Player>, world: LeagueWorld) => CareerOption[];
@@ -83,6 +105,10 @@ export class LeagueWorld {
   readonly countries = new Map<EntityId, Country>();
   readonly leagues = new Map<EntityId, League>();
   readonly organizations = new Map<EntityId, Organization>();
+  readonly seasons = new Map<EntityId, Season>();
+  readonly competitions = new Map<EntityId, Competition>();
+  readonly games = new Map<EntityId, GameFixture>();
+  readonly standings = new Map<EntityId, Map<EntityId, StandingRecord>>();
   readonly players = new Map<EntityId, Player>();
   readonly managers = new Map<EntityId, Manager>();
   readonly teams = new Map<EntityId, Team>();
@@ -118,6 +144,187 @@ export class LeagueWorld {
       }
     }
     this.teams.set(team.id, structuredClone(team));
+  }
+
+  createSeason(input: SeasonInput): Season {
+    this.requireLeague(input.leagueId);
+    for (const season of this.seasons.values()) {
+      if (season.leagueId === input.leagueId && season.year === input.year) {
+        throw new Error(`Season already exists for league ${input.leagueId} in ${input.year}`);
+      }
+    }
+    if (input.regularSeasonEndDate < input.startDate) {
+      throw new Error("regularSeasonEndDate must be >= startDate");
+    }
+    if (input.postseasonEndDate && input.postseasonEndDate < input.regularSeasonEndDate) {
+      throw new Error("postseasonEndDate must be >= regularSeasonEndDate");
+    }
+    const league = this.requireLeague(input.leagueId);
+    const season: Season = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("season"),
+      status: input.status ?? "PRESEASON",
+      allowDraws: input.allowDraws ?? league.allowDraws ?? true,
+      hasPostseason: input.hasPostseason ?? !!input.postseasonEndDate,
+    };
+    this.seasons.set(season.id, season);
+    this.standings.set(season.id, new Map());
+    return structuredClone(season);
+  }
+
+  createCompetition(input: CompetitionInput): Competition {
+    const season = this.requireSeason(input.seasonId);
+    if (input.leagueId !== season.leagueId) {
+      throw new Error(`Competition leagueId must match season leagueId: ${input.leagueId}`);
+    }
+    if (input.startDate < season.startDate || input.endDate > this.seasonFinalDate(season)) {
+      throw new Error("Competition dates must be inside the season range");
+    }
+    for (const teamId of input.participatingTeamIds) {
+      this.requireTeamInLeague(teamId, season.leagueId);
+      this.ensureStandingRecord(season.id, teamId);
+    }
+    const competition: Competition = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("competition"),
+    };
+    this.competitions.set(competition.id, competition);
+    return structuredClone(competition);
+  }
+
+  scheduleGame(input: GameFixtureInput): GameFixture {
+    const season = this.requireSeason(input.seasonId);
+    const competition = this.requireCompetition(input.competitionId);
+    if (competition.seasonId !== season.id) {
+      throw new Error(`Competition ${competition.id} does not belong to season ${season.id}`);
+    }
+    if (input.homeTeamId === input.awayTeamId) {
+      throw new Error("A team cannot play itself");
+    }
+    this.requireTeamInLeague(input.homeTeamId, season.leagueId);
+    this.requireTeamInLeague(input.awayTeamId, season.leagueId);
+    if (input.scheduledDate < season.startDate || input.scheduledDate > this.seasonFinalDate(season)) {
+      throw new Error("Scheduled game is outside the season range");
+    }
+    this.assertNoTeamScheduleConflict(input.scheduledDate, input.homeTeamId, input.awayTeamId);
+    this.ensureStandingRecord(season.id, input.homeTeamId);
+    this.ensureStandingRecord(season.id, input.awayTeamId);
+    const game: GameFixture = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("game"),
+      status: input.status ?? "SCHEDULED",
+    };
+    this.games.set(game.id, game);
+    return structuredClone(game);
+  }
+
+  generateRoundRobinSchedule(options: RoundRobinScheduleOptions): GameFixture[] {
+    const season = this.requireSeason(options.seasonId);
+    const competition = this.requireCompetition(options.competitionId);
+    if (competition.seasonId !== season.id) {
+      throw new Error(`Competition ${competition.id} does not belong to season ${season.id}`);
+    }
+    if (options.teamIds.length < 2) {
+      throw new Error("At least two teams are required for a round-robin schedule");
+    }
+    if (!Number.isInteger(options.gamesPerOpponent) || options.gamesPerOpponent <= 0) {
+      throw new Error("gamesPerOpponent must be a positive integer");
+    }
+    const uniqueTeamIds = new Set(options.teamIds);
+    if (uniqueTeamIds.size !== options.teamIds.length) {
+      throw new Error("Round-robin teamIds must be unique");
+    }
+    for (const teamId of options.teamIds) {
+      this.requireTeamInLeague(teamId, season.leagueId);
+    }
+
+    const games: GameFixture[] = [];
+    let offsetDays = 0;
+    for (let repeat = 0; repeat < options.gamesPerOpponent; repeat += 1) {
+      for (let homeIndex = 0; homeIndex < options.teamIds.length - 1; homeIndex += 1) {
+        for (let awayIndex = homeIndex + 1; awayIndex < options.teamIds.length; awayIndex += 1) {
+          const teamA = options.teamIds[homeIndex]!;
+          const teamB = options.teamIds[awayIndex]!;
+          const flipHome = repeat % 2 === 1;
+          const homeTeamId = flipHome ? teamB : teamA;
+          const awayTeamId = flipHome ? teamA : teamB;
+          const scheduledDate = this.addDays(options.startDate, offsetDays);
+          games.push(
+            this.scheduleGame({
+              seasonId: season.id,
+              competitionId: competition.id,
+              homeTeamId,
+              awayTeamId,
+              scheduledDate,
+              ...(options.venueByHomeTeamId?.[homeTeamId]
+                ? { venue: options.venueByHomeTeamId[homeTeamId] }
+                : {}),
+            }),
+          );
+          offsetDays += 1 + (options.restDaysBetweenRounds ?? 0);
+        }
+      }
+    }
+    return games;
+  }
+
+  recordGameResult(gameId: EntityId, result: GameResult): GameFixture {
+    return this.completeGame(gameId, result);
+  }
+
+  completeGame(gameId: EntityId, result: GameResult): GameFixture {
+    const game = this.requireGame(gameId);
+    if (game.status === "COMPLETED") {
+      throw new Error(`Game is already completed: ${gameId}`);
+    }
+    if (game.status === "CANCELLED") {
+      throw new Error(`Cancelled game cannot be completed: ${gameId}`);
+    }
+    this.validateGameResult(result);
+    const season = this.requireSeason(game.seasonId);
+    if (!season.allowDraws && result.homeScore === result.awayScore) {
+      throw new Error(`Season does not allow draws: ${season.id}`);
+    }
+    game.result = structuredClone(result);
+    game.status = "COMPLETED";
+    this.recalculateStandings(game.seasonId);
+    this.record("GAME_COMPLETED", {
+      subjectId: game.id,
+      teamId: game.homeTeamId,
+      reason: "경기 결과 입력",
+      payload: {
+        gameId: game.id,
+        seasonId: game.seasonId,
+        competitionId: game.competitionId,
+        homeTeamId: game.homeTeamId,
+        awayTeamId: game.awayTeamId,
+        result,
+      },
+    });
+    this.assertInvariants();
+    return structuredClone(game);
+  }
+
+  postponeGame(gameId: EntityId, reason: string): void {
+    const game = this.requireGame(gameId);
+    if (game.status === "COMPLETED") {
+      throw new Error(`Completed game cannot be postponed: ${gameId}`);
+    }
+    game.status = "POSTPONED";
+    this.record("GAME_POSTPONED", {
+      subjectId: game.id,
+      teamId: game.homeTeamId,
+      reason,
+      payload: { gameId: game.id, seasonId: game.seasonId },
+    });
+    this.assertInvariants();
+  }
+
+  getStandings(seasonId: EntityId): StandingRecord[] {
+    this.requireSeason(seasonId);
+    return [...(this.standings.get(seasonId)?.values() ?? [])]
+      .map((record) => structuredClone(record))
+      .sort((a, b) => b.winningPercentage - a.winningPercentage || a.gamesBehind - b.gamesBehind);
   }
 
   addPlayer(player: PlayerInput): void {
@@ -438,6 +645,7 @@ export class LeagueWorld {
 
   advanceDay(options: AdvanceWorldOptions = {}): ISODate {
     const date = this.clock.advanceDays(1);
+    this.progressSeasonStatuses();
     this.refreshPlayerAges();
     if (options.injuries !== false) this.progressPlayerInjuries(options);
     if (options.development !== false) this.progressPlayerDevelopment();
@@ -531,6 +739,7 @@ export class LeagueWorld {
 
   validateInvariants(): string[] {
     const issues: string[] = [];
+    this.validateSeasonAndScheduleInvariants(issues);
     for (const player of this.players.values()) {
       this.validatePlayerModel(player, issues);
       this.validatePersonCareer(player, "PLAYER", player.status, player.currentTeamId, issues);
@@ -604,6 +813,275 @@ export class LeagueWorld {
     if (issues.length > 0) {
       throw new Error(`World invariant violation: ${issues.join("; ")}`);
     }
+  }
+
+  private progressSeasonStatuses(): void {
+    for (const season of this.seasons.values()) {
+      const today = this.clock.now();
+      if (season.status === "PRESEASON" && today >= season.startDate) {
+        season.status = "REGULAR_SEASON";
+        this.record("SEASON_STARTED", {
+          subjectId: season.id,
+          reason: "정규시즌 시작",
+          payload: { leagueId: season.leagueId, year: season.year },
+        });
+      }
+      if (season.status === "REGULAR_SEASON" && today > season.regularSeasonEndDate) {
+        if (season.hasPostseason && season.postseasonEndDate) {
+          season.status = "POSTSEASON";
+          this.record("REGULAR_SEASON_ENDED", {
+            subjectId: season.id,
+            reason: "정규시즌 종료",
+            payload: { leagueId: season.leagueId, year: season.year },
+          });
+          this.record("POSTSEASON_STARTED", {
+            subjectId: season.id,
+            reason: "포스트시즌 시작",
+            payload: { leagueId: season.leagueId, year: season.year },
+          });
+        } else {
+          season.status = "COMPLETED";
+          this.record("REGULAR_SEASON_ENDED", {
+            subjectId: season.id,
+            reason: "정규시즌 종료",
+            payload: { leagueId: season.leagueId, year: season.year },
+          });
+          this.record("SEASON_COMPLETED", {
+            subjectId: season.id,
+            reason: "시즌 종료",
+            payload: { leagueId: season.leagueId, year: season.year },
+          });
+        }
+      }
+      if (
+        season.status === "POSTSEASON" &&
+        season.postseasonEndDate &&
+        today > season.postseasonEndDate
+      ) {
+        season.status = "COMPLETED";
+        this.record("SEASON_COMPLETED", {
+          subjectId: season.id,
+          reason: "시즌 종료",
+          payload: { leagueId: season.leagueId, year: season.year },
+        });
+      }
+    }
+  }
+
+  private recalculateStandings(seasonId: EntityId): void {
+    const season = this.requireSeason(seasonId);
+    const records = new Map<EntityId, StandingRecord>();
+    for (const game of this.games.values()) {
+      if (game.seasonId !== seasonId || game.status !== "COMPLETED" || !game.result) continue;
+      const home = this.ensureStandingRecordIn(records, seasonId, game.homeTeamId);
+      const away = this.ensureStandingRecordIn(records, seasonId, game.awayTeamId);
+      home.gamesPlayed += 1;
+      away.gamesPlayed += 1;
+      if (game.result.homeScore > game.result.awayScore) {
+        home.wins += 1;
+        away.losses += 1;
+      } else if (game.result.homeScore < game.result.awayScore) {
+        away.wins += 1;
+        home.losses += 1;
+      } else if (season.allowDraws) {
+        home.draws += 1;
+        away.draws += 1;
+      }
+    }
+    for (const competition of this.competitions.values()) {
+      if (competition.seasonId !== seasonId) continue;
+      for (const teamId of competition.participatingTeamIds) {
+        this.ensureStandingRecordIn(records, seasonId, teamId);
+      }
+    }
+    this.updateStandingPercentages(records);
+    this.standings.set(seasonId, records);
+  }
+
+  private updateStandingPercentages(records: Map<EntityId, StandingRecord>): void {
+    let leaderWins = 0;
+    let leaderLosses = 0;
+    for (const record of records.values()) {
+      record.winningPercentage =
+        record.gamesPlayed === 0 ? 0 : (record.wins + record.draws * 0.5) / record.gamesPlayed;
+      if (
+        record.winningPercentage > (leaderWins + leaderLosses === 0 ? 0 : leaderWins / (leaderWins + leaderLosses)) ||
+        (record.winningPercentage === (leaderWins + leaderLosses === 0 ? 0 : leaderWins / (leaderWins + leaderLosses)) &&
+          record.wins > leaderWins)
+      ) {
+        leaderWins = record.wins;
+        leaderLosses = record.losses;
+      }
+    }
+    for (const record of records.values()) {
+      record.gamesBehind = Math.max(0, (leaderWins - record.wins + record.losses - leaderLosses) / 2);
+    }
+  }
+
+  private ensureStandingRecord(seasonId: EntityId, teamId: EntityId): StandingRecord {
+    const records = this.standings.get(seasonId) ?? new Map<EntityId, StandingRecord>();
+    this.standings.set(seasonId, records);
+    return this.ensureStandingRecordIn(records, seasonId, teamId);
+  }
+
+  private ensureStandingRecordIn(
+    records: Map<EntityId, StandingRecord>,
+    seasonId: EntityId,
+    teamId: EntityId,
+  ): StandingRecord {
+    const existing = records.get(teamId);
+    if (existing) return existing;
+    const created: StandingRecord = {
+      seasonId,
+      teamId,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      gamesPlayed: 0,
+      winningPercentage: 0,
+      gamesBehind: 0,
+    };
+    records.set(teamId, created);
+    return created;
+  }
+
+  private validateSeasonAndScheduleInvariants(issues: string[]): void {
+    const seasonKeys = new Set<string>();
+    for (const season of this.seasons.values()) {
+      if (!this.leagues.has(season.leagueId)) {
+        issues.push(`Season ${season.id} has missing league ${season.leagueId}`);
+      }
+      const key = `${season.leagueId}:${season.year}`;
+      if (seasonKeys.has(key)) {
+        issues.push(`Duplicate season for league/year ${key}`);
+      }
+      seasonKeys.add(key);
+      if (season.regularSeasonEndDate < season.startDate) {
+        issues.push(`Season ${season.id} regularSeasonEndDate is before startDate`);
+      }
+      if (season.postseasonEndDate && season.postseasonEndDate < season.regularSeasonEndDate) {
+        issues.push(`Season ${season.id} postseasonEndDate is before regularSeasonEndDate`);
+      }
+    }
+
+    for (const competition of this.competitions.values()) {
+      const season = this.seasons.get(competition.seasonId);
+      if (!season) {
+        issues.push(`Competition ${competition.id} has missing season ${competition.seasonId}`);
+        continue;
+      }
+      if (competition.leagueId !== season.leagueId) {
+        issues.push(`Competition ${competition.id} leagueId does not match season`);
+      }
+      if (competition.startDate < season.startDate || competition.endDate > this.seasonFinalDate(season)) {
+        issues.push(`Competition ${competition.id} is outside season range`);
+      }
+      for (const teamId of competition.participatingTeamIds) {
+        const team = this.teams.get(teamId);
+        if (!team) {
+          issues.push(`Competition ${competition.id} has missing team ${teamId}`);
+        } else if (team.leagueId !== competition.leagueId) {
+          issues.push(`Competition ${competition.id} team ${teamId} is in another league`);
+        }
+      }
+    }
+
+    const scheduleSlots = new Set<string>();
+    for (const game of this.games.values()) {
+      const season = this.seasons.get(game.seasonId);
+      const competition = this.competitions.get(game.competitionId);
+      if (!season) {
+        issues.push(`Game ${game.id} has missing season ${game.seasonId}`);
+        continue;
+      }
+      if (!competition) {
+        issues.push(`Game ${game.id} has missing competition ${game.competitionId}`);
+      } else if (competition.seasonId !== game.seasonId) {
+        issues.push(`Game ${game.id} competition does not belong to season`);
+      }
+      if (game.homeTeamId === game.awayTeamId) {
+        issues.push(`Game ${game.id} has the same home and away team`);
+      }
+      for (const teamId of [game.homeTeamId, game.awayTeamId]) {
+        const team = this.teams.get(teamId);
+        if (!team) {
+          issues.push(`Game ${game.id} has missing team ${teamId}`);
+        } else if (team.leagueId !== season.leagueId) {
+          issues.push(`Game ${game.id} team ${teamId} is in another league`);
+        }
+        const slot = `${game.scheduledDate}:${teamId}`;
+        if (scheduleSlots.has(slot)) {
+          issues.push(`Team ${teamId} has multiple games on ${game.scheduledDate}`);
+        }
+        scheduleSlots.add(slot);
+      }
+      if (game.scheduledDate < season.startDate || game.scheduledDate > this.seasonFinalDate(season)) {
+        issues.push(`Game ${game.id} is outside season range`);
+      }
+      if (game.status === "COMPLETED") {
+        if (!game.result) {
+          issues.push(`Completed game ${game.id} is missing result`);
+        } else if (!season.allowDraws && game.result.homeScore === game.result.awayScore) {
+          issues.push(`Completed game ${game.id} is a draw in a no-draw season`);
+        }
+      }
+    }
+
+    this.validateStandingsConsistency(issues);
+  }
+
+  private validateStandingsConsistency(issues: string[]): void {
+    for (const seasonId of this.seasons.keys()) {
+      const expected = this.computeStandingsSnapshot(seasonId);
+      const actual = this.standings.get(seasonId) ?? new Map<EntityId, StandingRecord>();
+      for (const [teamId, expectedRecord] of expected) {
+        const actualRecord = actual.get(teamId);
+        if (!actualRecord) {
+          issues.push(`Standings for season ${seasonId} missing team ${teamId}`);
+          continue;
+        }
+        if (
+          actualRecord.wins !== expectedRecord.wins ||
+          actualRecord.losses !== expectedRecord.losses ||
+          actualRecord.draws !== expectedRecord.draws ||
+          actualRecord.gamesPlayed !== expectedRecord.gamesPlayed ||
+          actualRecord.winningPercentage !== expectedRecord.winningPercentage ||
+          actualRecord.gamesBehind !== expectedRecord.gamesBehind
+        ) {
+          issues.push(`Standings for season ${seasonId} team ${teamId} do not match completed games`);
+        }
+      }
+    }
+  }
+
+  private computeStandingsSnapshot(seasonId: EntityId): Map<EntityId, StandingRecord> {
+    const records = new Map<EntityId, StandingRecord>();
+    for (const competition of this.competitions.values()) {
+      if (competition.seasonId !== seasonId) continue;
+      for (const teamId of competition.participatingTeamIds) {
+        this.ensureStandingRecordIn(records, seasonId, teamId);
+      }
+    }
+    const season = this.requireSeason(seasonId);
+    for (const game of this.games.values()) {
+      if (game.seasonId !== seasonId || game.status !== "COMPLETED" || !game.result) continue;
+      const home = this.ensureStandingRecordIn(records, seasonId, game.homeTeamId);
+      const away = this.ensureStandingRecordIn(records, seasonId, game.awayTeamId);
+      home.gamesPlayed += 1;
+      away.gamesPlayed += 1;
+      if (game.result.homeScore > game.result.awayScore) {
+        home.wins += 1;
+        away.losses += 1;
+      } else if (game.result.homeScore < game.result.awayScore) {
+        away.wins += 1;
+        home.losses += 1;
+      } else if (season.allowDraws) {
+        home.draws += 1;
+        away.draws += 1;
+      }
+    }
+    this.updateStandingPercentages(records);
+    return records;
   }
 
   private progressDailyCareers(options: AdvanceWorldOptions): void {
@@ -1371,6 +1849,46 @@ export class LeagueWorld {
     return value;
   }
 
+  private addDays(date: ISODate, days: number): ISODate {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10) as ISODate;
+  }
+
+  private seasonFinalDate(season: Season): ISODate {
+    return season.postseasonEndDate ?? season.regularSeasonEndDate;
+  }
+
+  private assertNoTeamScheduleConflict(
+    scheduledDate: ISODate,
+    homeTeamId: EntityId,
+    awayTeamId: EntityId,
+  ): void {
+    for (const game of this.games.values()) {
+      if (game.scheduledDate !== scheduledDate) continue;
+      if (game.status === "CANCELLED") continue;
+      if (
+        game.homeTeamId === homeTeamId ||
+        game.awayTeamId === homeTeamId ||
+        game.homeTeamId === awayTeamId ||
+        game.awayTeamId === awayTeamId
+      ) {
+        throw new Error(`Team already has a game on ${scheduledDate}`);
+      }
+    }
+  }
+
+  private validateGameResult(result: GameResult): void {
+    if (
+      !Number.isInteger(result.homeScore) ||
+      !Number.isInteger(result.awayScore) ||
+      result.homeScore < 0 ||
+      result.awayScore < 0
+    ) {
+      throw new Error("Game scores must be non-negative integers");
+    }
+  }
+
   private requireCountry(id: EntityId): Country {
     const value = this.countries.get(id);
     if (!value) throw new Error(`Country not found: ${id}`);
@@ -1381,6 +1899,32 @@ export class LeagueWorld {
     const value = this.leagues.get(id);
     if (!value) throw new Error(`League not found: ${id}`);
     return value;
+  }
+
+  private requireSeason(id: EntityId): Season {
+    const value = this.seasons.get(id);
+    if (!value) throw new Error(`Season not found: ${id}`);
+    return value;
+  }
+
+  private requireCompetition(id: EntityId): Competition {
+    const value = this.competitions.get(id);
+    if (!value) throw new Error(`Competition not found: ${id}`);
+    return value;
+  }
+
+  private requireGame(id: EntityId): GameFixture {
+    const value = this.games.get(id);
+    if (!value) throw new Error(`Game not found: ${id}`);
+    return value;
+  }
+
+  private requireTeamInLeague(teamId: EntityId, leagueId: EntityId): Team {
+    const team = this.requireTeam(teamId);
+    if (team.leagueId !== leagueId) {
+      throw new Error(`Team ${teamId} does not belong to league ${leagueId}`);
+    }
+    return team;
   }
 
   private requireOrganization(id: EntityId): Organization {

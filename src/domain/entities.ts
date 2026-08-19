@@ -2,6 +2,8 @@ import type {
   EntityId,
   BattingSide,
   ContractStatus,
+  CompetitionType,
+  GameStatus,
   InjurySeverity,
   InjuryStatus,
   ISODate,
@@ -10,6 +12,7 @@ import type {
   PersonType,
   PlayerStatus,
   RosterStatus,
+  SeasonStatus,
   TeamType,
   ThrowingHand,
   WorldEventType,
@@ -27,6 +30,7 @@ export interface League {
   name: string;
   level: number;
   category: LeagueCategory;
+  allowDraws?: boolean;
 }
 
 export interface Team {
@@ -179,4 +183,56 @@ export interface WorldEvent {
   teamId?: EntityId;
   reason?: string;
   payload?: Record<string, unknown>;
+}
+
+export interface Season {
+  id: EntityId;
+  leagueId: EntityId;
+  year: number;
+  name: string;
+  startDate: ISODate;
+  regularSeasonEndDate: ISODate;
+  postseasonEndDate?: ISODate;
+  status: SeasonStatus;
+  allowDraws: boolean;
+  hasPostseason: boolean;
+}
+
+export interface Competition {
+  id: EntityId;
+  seasonId: EntityId;
+  leagueId: EntityId;
+  name: string;
+  type: CompetitionType;
+  startDate: ISODate;
+  endDate: ISODate;
+  participatingTeamIds: EntityId[];
+}
+
+export interface GameFixture {
+  id: EntityId;
+  seasonId: EntityId;
+  competitionId: EntityId;
+  homeTeamId: EntityId;
+  awayTeamId: EntityId;
+  scheduledDate: ISODate;
+  status: GameStatus;
+  venue?: string;
+  result?: GameResult;
+}
+
+export interface GameResult {
+  homeScore: number;
+  awayScore: number;
+}
+
+export interface StandingRecord {
+  seasonId: EntityId;
+  teamId: EntityId;
+  wins: number;
+  losses: number;
+  draws: number;
+  gamesPlayed: number;
+  winningPercentage: number;
+  gamesBehind: number;
 }
