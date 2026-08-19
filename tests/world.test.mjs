@@ -175,6 +175,106 @@ function createRegularSeason(world, overrides = {}) {
   return { season, competition };
 }
 
+const lineupPositionsWithDh = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+const lineupPositionsWithoutDh = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+
+function createScheduledGame(world, scheduledDate = "2027-01-01") {
+  const season = world.createSeason({
+    id: `season_lineup_${scheduledDate}`,
+    leagueId: "league_kr1",
+    year: Number(scheduledDate.slice(0, 4)),
+    name: `Lineup Test ${scheduledDate}`,
+    startDate: "2027-01-01",
+    regularSeasonEndDate: "2027-10-01",
+    allowDraws: true,
+  });
+  const competition = world.createCompetition({
+    id: `competition_lineup_${scheduledDate}`,
+    seasonId: season.id,
+    leagueId: season.leagueId,
+    name: `Lineup Competition ${scheduledDate}`,
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: ["team_seoul", "team_busan"],
+  });
+  return world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate,
+  });
+}
+
+function seedTeamPlayers(world, teamId, prefix, positions = lineupPositionsWithDh, extraPitchers = 2) {
+  const playerIds = [];
+  for (const [index, position] of positions.entries()) {
+    const playerId = `${prefix}_${position}_${index}`.replaceAll("-", "_");
+    world.addPlayer(createPlayer({
+      id: playerId,
+      name: `${prefix} ${position}`,
+      birthDate: "2001-05-01",
+      status: "PROFESSIONAL",
+      primaryPosition: position === "DH" ? "1B" : position,
+      secondaryPositions: position === "DH" ? ["DH"] : [],
+      currentAbility: 45 + index,
+      potentialAbility: 70,
+      battingRatings: {
+        contact: 45 + index,
+        power: 42 + index,
+        plateDiscipline: 40 + index,
+        speed: 44,
+        fielding: 43,
+        arm: 43,
+      },
+      pitchingRatings: {
+        velocity: position === "P" ? 70 : 20,
+        control: position === "P" ? 68 : 20,
+        movement: position === "P" ? 66 : 20,
+        stamina: position === "P" ? 72 : 20,
+        pitchQuality: position === "P" ? 67 : 20,
+        repertoire: [{ name: "Fastball", quality: position === "P" ? 70 : 20 }],
+      },
+    }));
+    world.assignPlayerToRoster(playerId, teamId, "ACTIVE", "경기 테스트 로스터 등록");
+    playerIds.push(playerId);
+  }
+  for (let index = 0; index < extraPitchers; index += 1) {
+    const playerId = `${prefix}_P_extra_${index}`;
+    world.addPlayer(createPlayer({
+      id: playerId,
+      name: `${prefix} Pitcher ${index}`,
+      birthDate: "2000-03-03",
+      status: "PROFESSIONAL",
+      primaryPosition: "P",
+      currentAbility: 58 + index,
+      potentialAbility: 75,
+      pitchingRatings: {
+        velocity: 72 + index,
+        control: 70 + index,
+        movement: 68 + index,
+        stamina: 74 + index,
+        pitchQuality: 71 + index,
+        repertoire: [{ name: "Fastball", quality: 72 + index }],
+      },
+    }));
+    world.assignPlayerToRoster(playerId, teamId, "ACTIVE", "투수 테스트 로스터 등록");
+    playerIds.push(playerId);
+  }
+  return playerIds;
+}
+
+function lineupFrom(playerIds, positions) {
+  return positions.map((defensivePosition, index) => ({
+    battingOrder: index + 1,
+    playerId: playerIds[index],
+    defensivePosition,
+    positionFit: 100,
+    outOfPosition: false,
+  }));
+}
+
 test("countries and leagues are owned by the world before teams are added", () => {
   const world = createWorld();
 
@@ -1432,4 +1532,266 @@ test("completed games cannot be completed twice", () => {
   world.completeGame(game.id, { homeScore: 1, awayScore: 0 });
 
   assert.throws(() => world.completeGame(game.id, { homeScore: 2, awayScore: 0 }), /already completed/);
+});
+
+test("game roster accepts a normal 9-player DH lineup", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const seoulPlayers = seedTeamPlayers(world, "team_seoul", "seoul_dh");
+  const busanPlayers = seedTeamPlayers(world, "team_busan", "busan_dh");
+
+  const roster = world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: seoulPlayers,
+    startingLineup: lineupFrom(seoulPlayers, lineupPositionsWithDh),
+    startingPitcherId: seoulPlayers.at(-1),
+    benchPlayerIds: [seoulPlayers.at(-2), seoulPlayers.at(-1)],
+    bullpenPlayerIds: [seoulPlayers.at(-2)],
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_busan",
+    activePlayerIds: busanPlayers,
+    startingLineup: lineupFrom(busanPlayers, lineupPositionsWithDh),
+    startingPitcherId: busanPlayers.at(-1),
+    benchPlayerIds: [busanPlayers.at(-2), busanPlayers.at(-1)],
+    bullpenPlayerIds: [busanPlayers.at(-2)],
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+
+  assert.equal(roster.startingLineup.length, 9);
+  assert.equal(roster.startingLineup.some((slot) => slot.defensivePosition === "DH"), true);
+  assert.deepEqual(world.validateGameReady(game.id), []);
+  assert.ok(world.events.some((event) => event.type === "GAME_ROSTER_CREATED"));
+});
+
+test("game roster supports a no-DH lineup with the pitcher batting", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const players = seedTeamPlayers(world, "team_seoul", "seoul_nodh", lineupPositionsWithoutDh, 1);
+
+  const roster = world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: players,
+    startingLineup: lineupFrom(players, lineupPositionsWithoutDh),
+    startingPitcherId: players[0],
+    benchPlayerIds: [players.at(-1)],
+    bullpenPlayerIds: [players.at(-1)],
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: false },
+  });
+
+  assert.equal(roster.startingLineup[0].defensivePosition, "P");
+  assert.deepEqual(world.validateGameRoster(game.id, "team_seoul"), []);
+});
+
+test("game roster rejects duplicate lineup players and duplicate batting orders", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const players = seedTeamPlayers(world, "team_seoul", "dup_lineup");
+  const lineup = lineupFrom(players, lineupPositionsWithDh);
+  lineup[1].playerId = lineup[0].playerId;
+  lineup[2].battingOrder = lineup[1].battingOrder;
+
+  assert.throws(
+    () => world.createGameRoster({
+      gameId: game.id,
+      teamId: "team_seoul",
+      activePlayerIds: players,
+      startingLineup: lineup,
+      startingPitcherId: players.at(-1),
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    }),
+    /duplicate/,
+  );
+});
+
+test("game roster rejects players from another team", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const seoulPlayers = seedTeamPlayers(world, "team_seoul", "wrong_team_seoul");
+  const busanPlayers = seedTeamPlayers(world, "team_busan", "wrong_team_busan");
+  const lineup = lineupFrom(seoulPlayers, lineupPositionsWithDh);
+  lineup[3].playerId = busanPlayers[0];
+
+  assert.throws(
+    () => world.createGameRoster({
+      gameId: game.id,
+      teamId: "team_seoul",
+      activePlayerIds: [...seoulPlayers, busanPlayers[0]],
+      startingLineup: lineup,
+      startingPitcherId: seoulPlayers.at(-1),
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    }),
+    /not on team/,
+  );
+});
+
+test("game roster rejects injured and retired players", () => {
+  const injuredWorld = createWorld();
+  const injuredGame = createScheduledGame(injuredWorld);
+  const injuredPlayers = seedTeamPlayers(injuredWorld, "team_seoul", "injured_lineup");
+  const injured = injuredWorld.players.get(injuredPlayers[2]);
+  injured.injury = {
+    status: "INJURED",
+    severity: "MODERATE",
+    expectedRecoveryDays: 30,
+    daysRemaining: 30,
+    startedOn: "2027-01-01",
+  };
+  injured.gameCondition.availableForGame = false;
+  injured.rosterStatus = "INJURED";
+  injured.rosterAssignments.at(-1).rosterStatus = "INJURED";
+
+  assert.throws(
+    () => injuredWorld.createGameRoster({
+      gameId: injuredGame.id,
+      teamId: "team_seoul",
+      activePlayerIds: injuredPlayers,
+      startingLineup: lineupFrom(injuredPlayers, lineupPositionsWithDh),
+      startingPitcherId: injuredPlayers.at(-1),
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    }),
+    /not available/,
+  );
+
+  const retiredWorld = createWorld();
+  const retiredGame = createScheduledGame(retiredWorld);
+  const retiredPlayers = seedTeamPlayers(retiredWorld, "team_seoul", "retired_lineup");
+  const retired = retiredWorld.players.get(retiredPlayers[4]);
+  retired.status = "RETIRED";
+
+  const issues = retiredWorld.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("retired")));
+  assert.throws(
+    () => retiredWorld.createGameRoster({
+      gameId: retiredGame.id,
+      teamId: "team_seoul",
+      activePlayerIds: retiredPlayers,
+      startingLineup: lineupFrom(retiredPlayers, lineupPositionsWithDh),
+      startingPitcherId: retiredPlayers.at(-1),
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    }),
+    /retired|not available/,
+  );
+});
+
+test("pitching rotation cycles through 4, 5, and 6 starters", () => {
+  for (const size of [4, 5, 6]) {
+    const world = createWorld(size);
+    const pitchers = seedTeamPlayers(world, "team_seoul", `rotation_${size}`, ["P"], size - 1);
+    world.setPitchingRotation("team_seoul", pitchers);
+
+    const turns = Array.from({ length: size + 1 }, () => world.selectNextStartingPitcher("team_seoul"));
+
+    assert.deepEqual(turns.slice(0, size), pitchers);
+    assert.equal(turns.at(-1), pitchers[0]);
+    assert.equal(world.pitchingRotations.get("team_seoul").nextStarterIndex, 1);
+  }
+});
+
+test("manager can manually override the starting pitcher", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const players = seedTeamPlayers(world, "team_seoul", "manual_sp");
+  const manualStarter = players.at(-2);
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: players,
+    startingLineup: lineupFrom(players, lineupPositionsWithDh),
+    startingPitcherId: players.at(-1),
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+
+  const roster = world.setStartingPitcher(game.id, "team_seoul", manualStarter);
+
+  assert.equal(roster.startingPitcherId, manualStarter);
+  assert.equal(world.events.at(-1).type, "STARTING_PITCHER_SET");
+});
+
+test("bullpen roles can store multiple role candidates", () => {
+  const world = createWorld();
+  const pitchers = seedTeamPlayers(world, "team_seoul", "bullpen_roles", ["P"], 2);
+
+  const assignment = world.assignBullpenRole("team_seoul", pitchers[1], ["SETUP", "MIDDLE_RELIEF"]);
+
+  assert.deepEqual(assignment.roles, ["SETUP", "MIDDLE_RELIEF"]);
+  assert.equal(world.bullpenAssignments.get("team_seoul").get(pitchers[1]).teamId, "team_seoul");
+});
+
+test("auto lineup generation creates valid rosters and is reproducible with the same seed", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    const game = createScheduledGame(world);
+    seedTeamPlayers(world, "team_seoul", "auto_seoul");
+    const roster = world.autoGenerateLineup({
+      gameId: game.id,
+      teamId: "team_seoul",
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    });
+    return {
+      lineup: roster.startingLineup.map((slot) => ({
+        order: slot.battingOrder,
+        playerId: slot.playerId,
+        position: slot.defensivePosition,
+      })),
+      startingPitcherId: roster.startingPitcherId,
+      issues: world.validateGameRoster(game.id, "team_seoul"),
+    };
+  }
+
+  const first = run(909);
+  assert.equal(first.lineup.length, 9);
+  assert.deepEqual(first.issues, []);
+  assert.deepEqual(first, run(909));
+});
+
+test("validateGameReady reports missing and valid game-day state", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world, "2027-01-02");
+  const seoulPlayers = seedTeamPlayers(world, "team_seoul", "ready_seoul");
+  const busanPlayers = seedTeamPlayers(world, "team_busan", "ready_busan");
+
+  assert.ok(world.validateGameReady(game.id).some((issue) => issue.includes("scheduled for")));
+  world.advanceDay({ injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  assert.ok(world.validateGameReady(game.id).some((issue) => issue.includes("Game roster missing")));
+
+  for (const [teamId, players] of [["team_seoul", seoulPlayers], ["team_busan", busanPlayers]]) {
+    world.createGameRoster({
+      gameId: game.id,
+      teamId,
+      activePlayerIds: players,
+      startingLineup: lineupFrom(players, lineupPositionsWithDh),
+      startingPitcherId: players.at(-1),
+      rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+    });
+  }
+
+  assert.deepEqual(world.validateGameReady(game.id), []);
+});
+
+test("game roster invariants catch invalid local mutations", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+  const players = seedTeamPlayers(world, "team_seoul", "bad_game_roster");
+  const roster = world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: players,
+    startingLineup: lineupFrom(players, lineupPositionsWithDh),
+    startingPitcherId: players.at(-1),
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+
+  world.gameRosters.get(roster.id).teamId = "team_busan";
+  world.gameRosters.get(roster.id).startingLineup[0].defensivePosition = "XX";
+  world.gameRosters.get(roster.id).startingLineup[1].playerId = world.gameRosters.get(roster.id).startingLineup[0].playerId;
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("not on team")));
+  assert.ok(issues.some((issue) => issue.includes("invalid position")));
+  assert.ok(issues.some((issue) => issue.includes("duplicate lineup player")));
 });

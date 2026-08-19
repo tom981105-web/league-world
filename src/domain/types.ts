@@ -15,6 +15,26 @@ export type BattingSide = "L" | "R" | "S";
 
 export type ThrowingHand = "L" | "R";
 
+export type BaseballPosition =
+  | "P"
+  | "C"
+  | "1B"
+  | "2B"
+  | "3B"
+  | "SS"
+  | "LF"
+  | "CF"
+  | "RF"
+  | "DH";
+
+export type BullpenRole =
+  | "CLOSER"
+  | "SETUP"
+  | "MIDDLE_RELIEF"
+  | "LONG_RELIEF"
+  | "MOP_UP"
+  | "FLEXIBLE";
+
 export type TeamType = "CLUB" | "SCHOOL" | "NATIONAL";
 
 export type PersonType = "PLAYER" | "MANAGER";
@@ -69,6 +89,9 @@ export type WorldEventType =
   | "SEASON_COMPLETED"
   | "GAME_POSTPONED"
   | "GAME_COMPLETED"
+  | "GAME_ROSTER_CREATED"
+  | "LINEUP_SET"
+  | "STARTING_PITCHER_SET"
   | "SEASON_STARTED"
   | "SEASON_ENDED"
   | "GAME_PLAYED";

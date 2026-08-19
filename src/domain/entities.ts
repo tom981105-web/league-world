@@ -1,6 +1,8 @@
 import type {
   EntityId,
+  BaseballPosition,
   BattingSide,
+  BullpenRole,
   ContractStatus,
   CompetitionType,
   GameStatus,
@@ -31,6 +33,8 @@ export interface League {
   level: number;
   category: LeagueCategory;
   allowDraws?: boolean;
+  usesDH?: boolean;
+  gameRosterRules?: GameRosterRules;
 }
 
 export interface Team {
@@ -71,6 +75,7 @@ export interface Player {
   pitchingRatings: PitchingRatings;
   developmentProfile: PlayerDevelopmentProfile;
   injury: PlayerInjury;
+  gameCondition: PlayerGameCondition;
   currentTeamId?: EntityId;
   currentOrganizationId?: EntityId;
   currentRosterAssignmentId?: EntityId;
@@ -150,6 +155,12 @@ export type PlayerInjury =
       startedOn: ISODate;
     };
 
+export interface PlayerGameCondition {
+  fatigue: number;
+  readiness: number;
+  availableForGame: boolean;
+}
+
 export interface Manager {
   id: EntityId;
   name: string;
@@ -219,6 +230,46 @@ export interface GameFixture {
   status: GameStatus;
   venue?: string;
   result?: GameResult;
+}
+
+export interface GameRosterRules {
+  maxActivePlayers: number;
+  battingOrderSize: number;
+  usesDH: boolean;
+  maxBenchPlayers?: number;
+  maxBullpenPlayers?: number;
+}
+
+export interface StartingLineupSlot {
+  battingOrder: number;
+  playerId: EntityId;
+  defensivePosition: BaseballPosition;
+  positionFit: number;
+  outOfPosition: boolean;
+}
+
+export interface GameDayRoster {
+  id: EntityId;
+  gameId: EntityId;
+  teamId: EntityId;
+  activePlayerIds: EntityId[];
+  startingLineup: StartingLineupSlot[];
+  startingPitcherId?: EntityId;
+  benchPlayerIds: EntityId[];
+  bullpenPlayerIds: EntityId[];
+  rules: GameRosterRules;
+}
+
+export interface PitchingRotation {
+  teamId: EntityId;
+  orderedStartingPitcherIds: EntityId[];
+  nextStarterIndex: number;
+}
+
+export interface BullpenAssignment {
+  teamId: EntityId;
+  playerId: EntityId;
+  roles: BullpenRole[];
 }
 
 export interface GameResult {

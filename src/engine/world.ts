@@ -1,15 +1,20 @@
 import type {
   CareerEntry,
+  BullpenAssignment,
   Competition,
   Country,
+  GameDayRoster,
   GameFixture,
+  GameRosterRules,
   GameResult,
   League,
   Manager,
   Organization,
+  PitchingRotation,
   PlayerContract,
   PlayerDevelopmentProfile,
   PlayerInjury,
+  StartingLineupSlot,
   Player,
   RosterAssignment,
   Season,
@@ -20,6 +25,8 @@ import type {
 import type {
   CompetitionType,
   EntityId,
+  BaseballPosition,
+  BullpenRole,
   GameStatus,
   InjurySeverity,
   ISODate,
@@ -48,6 +55,7 @@ type PlayerInput = Omit<
   | "pitchingRatings"
   | "developmentProfile"
   | "injury"
+  | "gameCondition"
   | "currentOrganizationId"
   | "currentRosterAssignmentId"
   | "rosterStatus"
@@ -67,6 +75,7 @@ type PlayerInput = Omit<
       | "pitchingRatings"
       | "developmentProfile"
       | "injury"
+      | "gameCondition"
       | "currentOrganizationId"
       | "currentRosterAssignmentId"
       | "rosterStatus"
@@ -82,6 +91,18 @@ type SeasonInput = Omit<Season, "id" | "status" | "allowDraws" | "hasPostseason"
 type CompetitionInput = Omit<Competition, "id"> & Partial<Pick<Competition, "id">>;
 type GameFixtureInput = Omit<GameFixture, "id" | "status"> &
   Partial<Pick<GameFixture, "id" | "status">>;
+type GameDayRosterInput = Omit<
+  GameDayRoster,
+  "id" | "startingLineup" | "benchPlayerIds" | "bullpenPlayerIds" | "rules"
+> &
+  Partial<Pick<GameDayRoster, "id" | "startingLineup" | "benchPlayerIds" | "bullpenPlayerIds" | "rules">>;
+
+export interface AutoGenerateLineupOptions {
+  gameId: EntityId;
+  teamId: EntityId;
+  rules?: Partial<GameRosterRules>;
+  startingPitcherId?: EntityId;
+}
 
 export interface RoundRobinScheduleOptions {
   seasonId: EntityId;
@@ -108,6 +129,9 @@ export class LeagueWorld {
   readonly seasons = new Map<EntityId, Season>();
   readonly competitions = new Map<EntityId, Competition>();
   readonly games = new Map<EntityId, GameFixture>();
+  readonly gameRosters = new Map<EntityId, GameDayRoster>();
+  readonly pitchingRotations = new Map<EntityId, PitchingRotation>();
+  readonly bullpenAssignments = new Map<EntityId, Map<EntityId, BullpenAssignment>>();
   readonly standings = new Map<EntityId, Map<EntityId, StandingRecord>>();
   readonly players = new Map<EntityId, Player>();
   readonly managers = new Map<EntityId, Manager>();
@@ -325,6 +349,230 @@ export class LeagueWorld {
     return [...(this.standings.get(seasonId)?.values() ?? [])]
       .map((record) => structuredClone(record))
       .sort((a, b) => b.winningPercentage - a.winningPercentage || a.gamesBehind - b.gamesBehind);
+  }
+
+  createGameRoster(input: GameDayRosterInput): GameDayRoster {
+    const game = this.requireGame(input.gameId);
+    this.requireGameTeam(game, input.teamId);
+    const rules = this.resolveGameRosterRules(game, input.rules);
+    const roster: GameDayRoster = {
+      id: input.id ?? this.ids.nextId("game_roster"),
+      gameId: input.gameId,
+      teamId: input.teamId,
+      activePlayerIds: structuredClone(input.activePlayerIds),
+      startingLineup: this.normalizeStartingLineup(input.startingLineup ?? []),
+      ...(input.startingPitcherId ? { startingPitcherId: input.startingPitcherId } : {}),
+      benchPlayerIds: structuredClone(input.benchPlayerIds ?? []),
+      bullpenPlayerIds: structuredClone(input.bullpenPlayerIds ?? []),
+      rules,
+    };
+    this.gameRosters.set(roster.id, roster);
+    const issues = this.validateGameRoster(input.gameId, input.teamId);
+    if (issues.length > 0) {
+      this.gameRosters.delete(roster.id);
+      throw new Error(`Invalid game roster: ${issues.join("; ")}`);
+    }
+    this.record("GAME_ROSTER_CREATED", {
+      subjectId: game.id,
+      teamId: input.teamId,
+      reason: "경기 엔트리 생성",
+      payload: { rosterId: roster.id, activePlayers: roster.activePlayerIds.length },
+    });
+    this.assertInvariants();
+    return structuredClone(roster);
+  }
+
+  setStartingLineup(gameId: EntityId, teamId: EntityId, lineup: StartingLineupSlot[]): GameDayRoster {
+    const roster = this.requireGameRoster(gameId, teamId);
+    const previous = structuredClone(roster.startingLineup);
+    roster.startingLineup = this.normalizeStartingLineup(lineup);
+    const issues = this.validateGameRoster(gameId, teamId);
+    if (issues.length > 0) {
+      roster.startingLineup = previous;
+      throw new Error(`Invalid starting lineup: ${issues.join("; ")}`);
+    }
+    this.record("LINEUP_SET", {
+      subjectId: gameId,
+      teamId,
+      reason: "선발 라인업 설정",
+      payload: { rosterId: roster.id, battingOrderSize: roster.startingLineup.length },
+    });
+    return structuredClone(roster);
+  }
+
+  setStartingPitcher(gameId: EntityId, teamId: EntityId, playerId: EntityId): GameDayRoster {
+    const roster = this.requireGameRoster(gameId, teamId);
+    const previous = roster.startingPitcherId;
+    roster.startingPitcherId = playerId;
+    const issues = this.validateGameRoster(gameId, teamId);
+    if (issues.length > 0) {
+      if (previous) roster.startingPitcherId = previous;
+      else delete roster.startingPitcherId;
+      throw new Error(`Invalid starting pitcher: ${issues.join("; ")}`);
+    }
+    this.record("STARTING_PITCHER_SET", {
+      subjectId: gameId,
+      teamId,
+      reason: "선발투수 설정",
+      payload: { rosterId: roster.id, playerId },
+    });
+    return structuredClone(roster);
+  }
+
+  setPitchingRotation(
+    teamId: EntityId,
+    orderedStartingPitcherIds: EntityId[],
+    nextStarterIndex = 0,
+  ): PitchingRotation {
+    this.requireTeam(teamId);
+    if (orderedStartingPitcherIds.length === 0) {
+      throw new Error("Pitching rotation requires at least one pitcher");
+    }
+    if (new Set(orderedStartingPitcherIds).size !== orderedStartingPitcherIds.length) {
+      throw new Error("Pitching rotation cannot contain duplicate pitchers");
+    }
+    for (const playerId of orderedStartingPitcherIds) {
+      this.assertPlayerBelongsToTeam(playerId, teamId);
+    }
+    if (
+      !Number.isInteger(nextStarterIndex) ||
+      nextStarterIndex < 0 ||
+      nextStarterIndex >= orderedStartingPitcherIds.length
+    ) {
+      throw new Error("nextStarterIndex is outside the pitching rotation");
+    }
+    const rotation: PitchingRotation = {
+      teamId,
+      orderedStartingPitcherIds: structuredClone(orderedStartingPitcherIds),
+      nextStarterIndex,
+    };
+    this.pitchingRotations.set(teamId, rotation);
+    this.assertInvariants();
+    return structuredClone(rotation);
+  }
+
+  selectNextStartingPitcher(teamId: EntityId): EntityId {
+    const rotation = this.pitchingRotations.get(teamId);
+    if (!rotation) throw new Error(`Pitching rotation not found for team: ${teamId}`);
+    const playerId = rotation.orderedStartingPitcherIds[rotation.nextStarterIndex]!;
+    rotation.nextStarterIndex = (rotation.nextStarterIndex + 1) % rotation.orderedStartingPitcherIds.length;
+    return playerId;
+  }
+
+  setStartingPitcherFromRotation(gameId: EntityId, teamId: EntityId): GameDayRoster {
+    return this.setStartingPitcher(gameId, teamId, this.selectNextStartingPitcher(teamId));
+  }
+
+  assignBullpenRole(teamId: EntityId, playerId: EntityId, roles: BullpenRole[]): BullpenAssignment {
+    this.requireTeam(teamId);
+    this.assertPlayerBelongsToTeam(playerId, teamId);
+    if (roles.length === 0) throw new Error("At least one bullpen role is required");
+    for (const role of roles) this.assertValidBullpenRole(role);
+    const assignment: BullpenAssignment = {
+      teamId,
+      playerId,
+      roles: [...new Set(roles)],
+    };
+    const teamAssignments = this.bullpenAssignments.get(teamId) ?? new Map<EntityId, BullpenAssignment>();
+    teamAssignments.set(playerId, assignment);
+    this.bullpenAssignments.set(teamId, teamAssignments);
+    return structuredClone(assignment);
+  }
+
+  autoGenerateLineup(options: AutoGenerateLineupOptions): GameDayRoster {
+    const game = this.requireGame(options.gameId);
+    this.requireGameTeam(game, options.teamId);
+    const rules = this.resolveGameRosterRules(game, options.rules);
+    const startingPitcherId =
+      options.startingPitcherId ??
+      (this.pitchingRotations.has(options.teamId) ? this.selectNextStartingPitcher(options.teamId) : undefined);
+    const candidates = [...this.players.values()].filter(
+      (player) => player.currentTeamId === options.teamId && this.isPlayerAvailableForGame(player),
+    );
+    const requiredPositions = this.requiredLineupPositions(rules);
+    const selected = new Set<EntityId>();
+    const lineup: StartingLineupSlot[] = [];
+
+    for (const position of requiredPositions) {
+      const forcedPitcher =
+        position === "P" && startingPitcherId
+          ? candidates.find((player) => player.id === startingPitcherId && !selected.has(player.id))
+          : undefined;
+      const player =
+        forcedPitcher ??
+        this.bestLineupCandidate(candidates, selected, position);
+      if (!player) {
+        throw new Error(`Not enough available players to fill ${position}`);
+      }
+      selected.add(player.id);
+      lineup.push(this.makeLineupSlot(lineup.length + 1, player.id, position));
+    }
+
+    const pitcherId =
+      startingPitcherId ??
+      this.bestLineupCandidate(candidates, new Set<EntityId>(), "P")?.id;
+    if (!pitcherId) throw new Error("No available starting pitcher candidate");
+
+    const activePlayerIds = this.rankGameCandidates(candidates, "DH")
+      .map((player) => player.id)
+      .slice(0, rules.maxActivePlayers);
+    for (const playerId of [...selected, pitcherId]) {
+      if (!activePlayerIds.includes(playerId)) activePlayerIds.unshift(playerId);
+    }
+    const cappedActivePlayerIds = activePlayerIds.slice(0, rules.maxActivePlayers);
+    const benchPlayerIds = cappedActivePlayerIds.filter((playerId) => !selected.has(playerId) && playerId !== pitcherId);
+    const bullpenPlayerIds = cappedActivePlayerIds.filter((playerId) => {
+      const player = this.requirePlayer(playerId);
+      return playerId !== pitcherId && this.positionFit(player, "P") >= 60;
+    });
+
+    return this.createGameRoster({
+      gameId: options.gameId,
+      teamId: options.teamId,
+      activePlayerIds: cappedActivePlayerIds,
+      startingLineup: lineup,
+      startingPitcherId: pitcherId,
+      benchPlayerIds,
+      bullpenPlayerIds,
+      rules,
+    });
+  }
+
+  validateGameRoster(gameId: EntityId, teamId: EntityId): string[] {
+    const game = this.games.get(gameId);
+    const roster = this.findGameRoster(gameId, teamId);
+    const issues: string[] = [];
+    if (!game) {
+      issues.push(`Game not found: ${gameId}`);
+      return issues;
+    }
+    if (!roster) {
+      issues.push(`Game roster missing for team ${teamId}`);
+      return issues;
+    }
+    this.validateGameRosterState(roster, issues);
+    return issues;
+  }
+
+  validateGameReady(gameId: EntityId): string[] {
+    const game = this.games.get(gameId);
+    const issues: string[] = [];
+    if (!game) {
+      issues.push(`Game not found: ${gameId}`);
+      return issues;
+    }
+    if (game.scheduledDate !== this.clock.now()) {
+      issues.push(`Game ${gameId} is scheduled for ${game.scheduledDate}, not ${this.clock.now()}`);
+    }
+    for (const teamId of [game.homeTeamId, game.awayTeamId]) {
+      const roster = this.findGameRoster(gameId, teamId);
+      if (!roster) {
+        issues.push(`Game roster missing for team ${teamId}`);
+      } else {
+        this.validateGameRosterState(roster, issues);
+      }
+    }
+    return issues;
   }
 
   addPlayer(player: PlayerInput): void {
@@ -740,6 +988,7 @@ export class LeagueWorld {
   validateInvariants(): string[] {
     const issues: string[] = [];
     this.validateSeasonAndScheduleInvariants(issues);
+    this.validateGameRosterInvariants(issues);
     for (const player of this.players.values()) {
       this.validatePlayerModel(player, issues);
       this.validatePersonCareer(player, "PLAYER", player.status, player.currentTeamId, issues);
@@ -813,6 +1062,341 @@ export class LeagueWorld {
     if (issues.length > 0) {
       throw new Error(`World invariant violation: ${issues.join("; ")}`);
     }
+  }
+
+  private validateGameRosterInvariants(issues: string[]): void {
+    const rosterKeys = new Set<string>();
+    for (const roster of this.gameRosters.values()) {
+      const key = `${roster.gameId}:${roster.teamId}`;
+      if (rosterKeys.has(key)) {
+        issues.push(`Duplicate game roster for ${key}`);
+      }
+      rosterKeys.add(key);
+      this.validateGameRosterState(roster, issues);
+    }
+
+    for (const rotation of this.pitchingRotations.values()) {
+      if (!this.teams.has(rotation.teamId)) {
+        issues.push(`Pitching rotation has missing team ${rotation.teamId}`);
+      }
+      if (rotation.orderedStartingPitcherIds.length === 0) {
+        issues.push(`Pitching rotation ${rotation.teamId} has no pitchers`);
+      }
+      if (new Set(rotation.orderedStartingPitcherIds).size !== rotation.orderedStartingPitcherIds.length) {
+        issues.push(`Pitching rotation ${rotation.teamId} has duplicate pitchers`);
+      }
+      if (
+        !Number.isInteger(rotation.nextStarterIndex) ||
+        rotation.nextStarterIndex < 0 ||
+        rotation.nextStarterIndex >= rotation.orderedStartingPitcherIds.length
+      ) {
+        issues.push(`Pitching rotation ${rotation.teamId} has invalid nextStarterIndex`);
+      }
+      for (const playerId of rotation.orderedStartingPitcherIds) {
+        const player = this.players.get(playerId);
+        if (!player) {
+          issues.push(`Pitching rotation ${rotation.teamId} has missing player ${playerId}`);
+        } else if (player.currentTeamId !== rotation.teamId) {
+          issues.push(`Pitching rotation ${rotation.teamId} player ${playerId} is on another team`);
+        }
+      }
+    }
+
+    for (const [teamId, assignments] of this.bullpenAssignments) {
+      if (!this.teams.has(teamId)) {
+        issues.push(`Bullpen assignments have missing team ${teamId}`);
+      }
+      for (const assignment of assignments.values()) {
+        if (assignment.teamId !== teamId) {
+          issues.push(`Bullpen assignment ${assignment.playerId} team key mismatch`);
+        }
+        const player = this.players.get(assignment.playerId);
+        if (!player) {
+          issues.push(`Bullpen assignment has missing player ${assignment.playerId}`);
+        } else if (player.currentTeamId !== teamId) {
+          issues.push(`Bullpen assignment ${assignment.playerId} is on another team`);
+        }
+        for (const role of assignment.roles) {
+          if (!this.isBullpenRole(role)) {
+            issues.push(`Bullpen assignment ${assignment.playerId} has invalid role ${role}`);
+          }
+        }
+      }
+    }
+  }
+
+  private validateGameRosterState(roster: GameDayRoster, issues: string[]): void {
+    const game = this.games.get(roster.gameId);
+    if (!game) {
+      issues.push(`Game roster ${roster.id} has missing game ${roster.gameId}`);
+      return;
+    }
+    if (roster.teamId !== game.homeTeamId && roster.teamId !== game.awayTeamId) {
+      issues.push(`Game roster ${roster.id} team ${roster.teamId} is not in game ${roster.gameId}`);
+    }
+    if (!this.teams.has(roster.teamId)) {
+      issues.push(`Game roster ${roster.id} has missing team ${roster.teamId}`);
+    }
+    if (!Number.isInteger(roster.rules.maxActivePlayers) || roster.rules.maxActivePlayers < roster.rules.battingOrderSize) {
+      issues.push(`Game roster ${roster.id} has invalid maxActivePlayers`);
+    }
+    if (roster.rules.battingOrderSize !== 9) {
+      issues.push(`Game roster ${roster.id} battingOrderSize must be 9 for baseball games`);
+    }
+    if (roster.activePlayerIds.length > roster.rules.maxActivePlayers) {
+      issues.push(`Game roster ${roster.id} exceeds maxActivePlayers`);
+    }
+    if (new Set(roster.activePlayerIds).size !== roster.activePlayerIds.length) {
+      issues.push(`Game roster ${roster.id} has duplicate active players`);
+    }
+    if (roster.rules.maxBenchPlayers !== undefined && roster.benchPlayerIds.length > roster.rules.maxBenchPlayers) {
+      issues.push(`Game roster ${roster.id} exceeds maxBenchPlayers`);
+    }
+    if (roster.rules.maxBullpenPlayers !== undefined && roster.bullpenPlayerIds.length > roster.rules.maxBullpenPlayers) {
+      issues.push(`Game roster ${roster.id} exceeds maxBullpenPlayers`);
+    }
+
+    const active = new Set(roster.activePlayerIds);
+    for (const playerId of roster.activePlayerIds) {
+      this.validateGameRosterPlayer(roster, playerId, issues);
+    }
+    for (const playerId of [...roster.benchPlayerIds, ...roster.bullpenPlayerIds]) {
+      if (!active.has(playerId)) {
+        issues.push(`Game roster ${roster.id} player ${playerId} is listed outside active players`);
+      }
+    }
+
+    if (!roster.startingPitcherId) {
+      issues.push(`Game roster ${roster.id} is missing a starting pitcher`);
+    } else {
+      if (!active.has(roster.startingPitcherId)) {
+        issues.push(`Game roster ${roster.id} starting pitcher is not active`);
+      }
+      this.validateGameRosterPlayer(roster, roster.startingPitcherId, issues);
+    }
+
+    if (roster.startingLineup.length !== roster.rules.battingOrderSize) {
+      issues.push(`Game roster ${roster.id} starting lineup must have ${roster.rules.battingOrderSize} players`);
+    }
+    const orders = new Set<number>();
+    const lineupPlayers = new Set<EntityId>();
+    const positions = new Set<BaseballPosition>();
+    for (const slot of roster.startingLineup) {
+      if (!Number.isInteger(slot.battingOrder) || slot.battingOrder < 1 || slot.battingOrder > roster.rules.battingOrderSize) {
+        issues.push(`Game roster ${roster.id} has invalid battingOrder ${slot.battingOrder}`);
+      }
+      if (orders.has(slot.battingOrder)) {
+        issues.push(`Game roster ${roster.id} has duplicate battingOrder ${slot.battingOrder}`);
+      }
+      orders.add(slot.battingOrder);
+      if (lineupPlayers.has(slot.playerId)) {
+        issues.push(`Game roster ${roster.id} has duplicate lineup player ${slot.playerId}`);
+      }
+      lineupPlayers.add(slot.playerId);
+      if (!this.isBaseballPosition(slot.defensivePosition)) {
+        issues.push(`Game roster ${roster.id} has invalid position ${slot.defensivePosition}`);
+      }
+      positions.add(slot.defensivePosition);
+      if (!active.has(slot.playerId)) {
+        issues.push(`Game roster ${roster.id} lineup player ${slot.playerId} is not active`);
+      }
+      this.validateGameRosterPlayer(roster, slot.playerId, issues);
+    }
+
+    if (roster.rules.usesDH) {
+      if (!positions.has("DH")) issues.push(`Game roster ${roster.id} uses DH but has no DH slot`);
+      if (positions.has("P")) issues.push(`Game roster ${roster.id} uses DH but has a pitcher batting`);
+    } else {
+      if (positions.has("DH")) issues.push(`Game roster ${roster.id} does not use DH but has a DH slot`);
+      if (!positions.has("P")) issues.push(`Game roster ${roster.id} does not use DH but has no pitcher batting`);
+    }
+
+    for (const playerId of roster.benchPlayerIds) {
+      if (lineupPlayers.has(playerId)) {
+        issues.push(`Game roster ${roster.id} bench player ${playerId} is also in the lineup`);
+      }
+    }
+  }
+
+  private validateGameRosterPlayer(roster: GameDayRoster, playerId: EntityId, issues: string[]): void {
+    const player = this.players.get(playerId);
+    if (!player) {
+      issues.push(`Game roster ${roster.id} has missing player ${playerId}`);
+      return;
+    }
+    if (player.currentTeamId !== roster.teamId) {
+      issues.push(`Game roster ${roster.id} player ${playerId} is not on team ${roster.teamId}`);
+    }
+    const team = this.teams.get(roster.teamId);
+    if (team?.organizationId && player.currentOrganizationId !== team.organizationId) {
+      issues.push(`Game roster ${roster.id} player ${playerId} organization does not match team`);
+    }
+    if (player.status === "RETIRED") {
+      issues.push(`Game roster ${roster.id} player ${playerId} is retired`);
+    }
+    if (!this.isPlayerAvailableForGame(player)) {
+      issues.push(`Game roster ${roster.id} player ${playerId} is not available for game`);
+    }
+  }
+
+  private findGameRoster(gameId: EntityId, teamId: EntityId): GameDayRoster | undefined {
+    return [...this.gameRosters.values()].find(
+      (roster) => roster.gameId === gameId && roster.teamId === teamId,
+    );
+  }
+
+  private requireGameRoster(gameId: EntityId, teamId: EntityId): GameDayRoster {
+    const roster = this.findGameRoster(gameId, teamId);
+    if (!roster) throw new Error(`Game roster not found for ${gameId}:${teamId}`);
+    return roster;
+  }
+
+  private requireGameTeam(game: GameFixture, teamId: EntityId): void {
+    if (teamId !== game.homeTeamId && teamId !== game.awayTeamId) {
+      throw new Error(`Team ${teamId} is not part of game ${game.id}`);
+    }
+  }
+
+  private resolveGameRosterRules(game: GameFixture, overrides?: Partial<GameRosterRules>): GameRosterRules {
+    const season = this.requireSeason(game.seasonId);
+    const league = this.requireLeague(season.leagueId);
+    const leagueRules = league.gameRosterRules;
+    const usesDH = overrides?.usesDH ?? leagueRules?.usesDH ?? league.usesDH ?? true;
+    const rules: GameRosterRules = {
+      maxActivePlayers: overrides?.maxActivePlayers ?? leagueRules?.maxActivePlayers ?? 26,
+      battingOrderSize: overrides?.battingOrderSize ?? leagueRules?.battingOrderSize ?? 9,
+      usesDH,
+    };
+    const maxBenchPlayers = overrides?.maxBenchPlayers ?? leagueRules?.maxBenchPlayers;
+    const maxBullpenPlayers = overrides?.maxBullpenPlayers ?? leagueRules?.maxBullpenPlayers;
+    if (maxBenchPlayers !== undefined) rules.maxBenchPlayers = maxBenchPlayers;
+    if (maxBullpenPlayers !== undefined) rules.maxBullpenPlayers = maxBullpenPlayers;
+    return rules;
+  }
+
+  private normalizeStartingLineup(lineup: StartingLineupSlot[]): StartingLineupSlot[] {
+    return structuredClone(lineup).map((slot) => this.makeLineupSlot(slot.battingOrder, slot.playerId, slot.defensivePosition));
+  }
+
+  private makeLineupSlot(
+    battingOrder: number,
+    playerId: EntityId,
+    defensivePosition: BaseballPosition,
+  ): StartingLineupSlot {
+    const player = this.requirePlayer(playerId);
+    const positionFit = this.positionFit(player, defensivePosition);
+    return {
+      battingOrder,
+      playerId,
+      defensivePosition,
+      positionFit,
+      outOfPosition: positionFit < 60,
+    };
+  }
+
+  private requiredLineupPositions(rules: GameRosterRules): BaseballPosition[] {
+    return rules.usesDH
+      ? ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
+      : ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+  }
+
+  private bestLineupCandidate(
+    candidates: Player[],
+    selected: Set<EntityId>,
+    position: BaseballPosition,
+  ): Player | undefined {
+    return this.rankGameCandidates(
+      candidates.filter((player) => !selected.has(player.id)),
+      position,
+    )[0];
+  }
+
+  private rankGameCandidates(candidates: Player[], position: BaseballPosition): Player[] {
+    return [...candidates].sort((a, b) => {
+      const scoreA = this.lineupScore(a, position);
+      const scoreB = this.lineupScore(b, position);
+      return scoreB - scoreA || a.id.localeCompare(b.id);
+    });
+  }
+
+  private lineupScore(player: Player, position: BaseballPosition): number {
+    const hitting =
+      player.battingRatings.contact * 0.32 +
+      player.battingRatings.power * 0.24 +
+      player.battingRatings.plateDiscipline * 0.2 +
+      player.battingRatings.speed * 0.12 +
+      player.battingRatings.fielding * 0.06 +
+      player.battingRatings.arm * 0.06;
+    const pitcherScore =
+      player.pitchingRatings.velocity * 0.2 +
+      player.pitchingRatings.control * 0.25 +
+      player.pitchingRatings.movement * 0.25 +
+      player.pitchingRatings.stamina * 0.15 +
+      player.pitchingRatings.pitchQuality * 0.15;
+    const skillScore = position === "P" ? pitcherScore : hitting;
+    const conditionScore = player.gameCondition.readiness - player.gameCondition.fatigue * 0.35;
+    return (
+      this.positionFit(player, position) * 1.2 +
+      skillScore +
+      player.currentAbility * 0.8 +
+      conditionScore * 0.25 +
+      this.rng.next() * 0.0001
+    );
+  }
+
+  private positionFit(player: Player, position: BaseballPosition): number {
+    if (position === "DH") return 100;
+    if (this.normalizePlayerPosition(player.primaryPosition) === position) return 100;
+    if (player.secondaryPositions.some((candidate) => this.normalizePlayerPosition(candidate) === position)) return 80;
+    if (position === "P" && this.normalizePlayerPosition(player.primaryPosition) === "P") return 100;
+    if (position === "1B" && this.normalizePlayerPosition(player.primaryPosition) === "C") return 45;
+    if (
+      (position === "2B" || position === "SS" || position === "3B") &&
+      ["2B", "SS", "3B"].includes(this.normalizePlayerPosition(player.primaryPosition) ?? "")
+    ) {
+      return 55;
+    }
+    if (
+      (position === "LF" || position === "CF" || position === "RF") &&
+      ["LF", "CF", "RF"].includes(this.normalizePlayerPosition(player.primaryPosition) ?? "")
+    ) {
+      return 55;
+    }
+    return 20;
+  }
+
+  private normalizePlayerPosition(position: string): BaseballPosition | undefined {
+    if (position === "RHP" || position === "LHP" || position === "SP" || position === "RP") return "P";
+    return this.isBaseballPosition(position) ? position : undefined;
+  }
+
+  private isPlayerAvailableForGame(player: Player): boolean {
+    if (player.status === "RETIRED") return false;
+    if (!player.gameCondition.availableForGame) return false;
+    if (player.injury.status === "INJURED") return false;
+    if (player.injury.status === "RECOVERING" && player.gameCondition.readiness < 60) return false;
+    if (player.gameCondition.readiness < 40) return false;
+    if (player.gameCondition.fatigue > 95) return false;
+    return true;
+  }
+
+  private assertPlayerBelongsToTeam(playerId: EntityId, teamId: EntityId): void {
+    const player = this.requirePlayer(playerId);
+    if (player.currentTeamId !== teamId) {
+      throw new Error(`Player ${playerId} is not on team ${teamId}`);
+    }
+  }
+
+  private assertValidBullpenRole(role: BullpenRole): void {
+    if (!this.isBullpenRole(role)) throw new Error(`Invalid bullpen role: ${role}`);
+  }
+
+  private isBaseballPosition(position: string): position is BaseballPosition {
+    return ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"].includes(position);
+  }
+
+  private isBullpenRole(role: string): role is BullpenRole {
+    return ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"].includes(role);
   }
 
   private progressSeasonStatuses(): void {
@@ -1378,6 +1962,11 @@ export class LeagueWorld {
       pitchingRatings: this.normalizePitchingRatings(player.pitchingRatings, currentAbility),
       developmentProfile: this.normalizeDevelopmentProfile(player.developmentProfile),
       injury: structuredClone(player.injury ?? { status: "HEALTHY" }),
+      gameCondition: {
+        fatigue: this.clampRating(player.gameCondition?.fatigue ?? 0),
+        readiness: this.clampRating(player.gameCondition?.readiness ?? 100),
+        availableForGame: player.gameCondition?.availableForGame ?? true,
+      },
       rosterAssignments: structuredClone(player.rosterAssignments ?? []),
       contracts: structuredClone(player.contracts ?? []),
       careerEntries: structuredClone(player.careerEntries ?? []),
@@ -1695,6 +2284,11 @@ export class LeagueWorld {
     for (const pitch of player.pitchingRatings.repertoire) {
       if (!pitch.name) issues.push(`Player ${player.id} has a pitch without a name`);
       this.validateRating(pitch.quality, `Player ${player.id} pitch ${pitch.name}`, issues);
+    }
+    this.validateRating(player.gameCondition.fatigue, `Player ${player.id} fatigue`, issues);
+    this.validateRating(player.gameCondition.readiness, `Player ${player.id} readiness`, issues);
+    if (typeof player.gameCondition.availableForGame !== "boolean") {
+      issues.push(`Player ${player.id} availableForGame must be boolean`);
     }
 
     const profile = player.developmentProfile;
