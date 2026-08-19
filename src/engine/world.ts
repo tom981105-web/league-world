@@ -21,6 +21,12 @@ import type {
   LiveGame,
   ManagerGameStrategy,
   Manager,
+  BoardConfidence,
+  ManagerApplicationEvaluation,
+  ManagerContract,
+  ManagerContractOffer,
+  ManagerJobApplication,
+  ManagerJobVacancy,
   Organization,
   PlayerBattingGameLog,
   PlayerBattingSeasonStats,
@@ -52,6 +58,7 @@ import type {
   WorldEvent,
 } from "../domain/entities.js";
 import type {
+  ContractOfferStatus,
   ContractOfferDecision,
   CompetitionType,
   DraftDecision,
@@ -64,6 +71,10 @@ import type {
   GameStatus,
   InjurySeverity,
   ISODate,
+  ManagerApplicationDecision,
+  ManagerApplicationStatus,
+  ManagerJobVacancyStatus,
+  ManagerRole,
   PlateAppearanceResult,
   PitchingLeaderCategory,
   PersonType,
@@ -132,9 +143,47 @@ type PlayerInput = Omit<
       | "contractDemand"
       | "freeAgentStatus"
     >
+>;
+type ManagerInput = Omit<
+  Manager,
+  | "age"
+  | "nationality"
+  | "employmentStatus"
+  | "currentOrganizationId"
+  | "contracts"
+  | "careerStats"
+  | "careerEntries"
+  | "boardConfidence"
+> &
+  Partial<
+    Pick<
+      Manager,
+      | "age"
+      | "nationality"
+      | "employmentStatus"
+      | "currentOrganizationId"
+      | "contracts"
+      | "careerStats"
+      | "careerEntries"
+      | "boardConfidence"
+    >
   >;
-type ManagerInput = Omit<Manager, "careerEntries"> & Partial<Pick<Manager, "careerEntries">>;
 type PlayerContractInput = Omit<PlayerContract, "id" | "years"> & Partial<Pick<PlayerContract, "id" | "years">>;
+type ManagerContractInput = Omit<ManagerContract, "id"> & Partial<Pick<ManagerContract, "id">>;
+type ManagerJobVacancyInput = Omit<ManagerJobVacancy, "id" | "openedOn" | "status"> &
+  Partial<Pick<ManagerJobVacancy, "id" | "openedOn" | "status">>;
+type ManagerJobApplicationInput = Pick<ManagerJobApplication, "managerId" | "vacancyId"> &
+  Partial<Pick<ManagerJobApplication, "id" | "desiredSalary" | "desiredYears" | "reason">>;
+type ManagerContractOfferInput = Omit<
+  ManagerContractOffer,
+  "id" | "status" | "offeredOn" | "years" | "startDate" | "endDate" | "role" | "reason" | "expectations"
+> &
+  Partial<
+    Pick<
+      ManagerContractOffer,
+      "id" | "status" | "offeredOn" | "years" | "startDate" | "endDate" | "role" | "reason" | "expectations"
+    >
+  >;
 type SeasonInput = Omit<Season, "id" | "status" | "allowDraws" | "hasPostseason"> &
   Partial<Pick<Season, "id" | "status" | "allowDraws" | "hasPostseason">>;
 type CompetitionInput = Omit<Competition, "id"> & Partial<Pick<Competition, "id">>;
@@ -212,6 +261,10 @@ export class LeagueWorld {
   readonly standings = new Map<EntityId, Map<EntityId, StandingRecord>>();
   readonly players = new Map<EntityId, Player>();
   readonly managers = new Map<EntityId, Manager>();
+  readonly managerContracts = new Map<EntityId, ManagerContract>();
+  readonly managerJobVacancies = new Map<EntityId, ManagerJobVacancy>();
+  readonly managerJobApplications = new Map<EntityId, ManagerJobApplication>();
+  readonly managerContractOffers = new Map<EntityId, ManagerContractOffer>();
   readonly teams = new Map<EntityId, Team>();
   readonly scouts = new Map<EntityId, Scout>();
   readonly scoutingReports = new Map<EntityId, ScoutingReport>();
@@ -1789,11 +1842,7 @@ export class LeagueWorld {
   }
 
   addManager(manager: ManagerInput): void {
-    if (manager.currentTeamId) this.requireTeam(manager.currentTeamId);
-    const stored: Manager = {
-      ...structuredClone(manager),
-      careerEntries: structuredClone(manager.careerEntries ?? []),
-    };
+    const stored = this.normalizeManagerInput(manager);
     this.managers.set(manager.id, stored);
     if (stored.currentTeamId) {
       this.startCareerEntry(stored, "MANAGER", {
@@ -1807,6 +1856,173 @@ export class LeagueWorld {
       subjectId: manager.id,
       ...(manager.currentTeamId ? { teamId: manager.currentTeamId } : {}),
     });
+    this.assertInvariants();
+  }
+
+  registerManagerContract(contract: ManagerContractInput): ManagerContract {
+    const manager = this.requireManager(contract.managerId);
+    this.requireOrganization(contract.organizationId);
+    if (contract.teamId) {
+      const team = this.requireTeam(contract.teamId);
+      if (team.organizationId !== contract.organizationId) {
+        throw new Error(`Manager contract team does not belong to organization: ${contract.teamId}`);
+      }
+    }
+    if (manager.status === "RETIRED") {
+      throw new Error(`Retired manager cannot sign a contract: ${manager.id}`);
+    }
+    this.assertValidManagerContractShape(contract);
+    if (contract.status === "ACTIVE" && this.activeManagerContract(manager)) {
+      throw new Error(`Manager already has an active contract: ${manager.id}`);
+    }
+    const stored: ManagerContract = {
+      ...structuredClone(contract),
+      id: contract.id ?? this.ids.nextId("manager_contract"),
+    };
+    manager.contracts.push(stored);
+    this.managerContracts.set(stored.id, stored);
+    if (stored.status === "ACTIVE") {
+      this.assignManagerEmployment(manager, stored.organizationId, stored.teamId, stored.role, "감독 계약 등록");
+    }
+    this.assertInvariants();
+    return structuredClone(stored);
+  }
+
+  openManagerJobVacancy(input: ManagerJobVacancyInput): ManagerJobVacancy {
+    this.requireOrganization(input.organizationId);
+    const team = this.requireTeam(input.teamId);
+    if (team.organizationId !== input.organizationId) {
+      throw new Error(`Manager vacancy team does not belong to organization: ${input.teamId}`);
+    }
+    if (this.managerForTeam(input.teamId)) {
+      throw new Error(`Team already has an active manager: ${input.teamId}`);
+    }
+    this.assertSalaryRange(input.salaryRange);
+    this.assertYearsRange(input.contractYearsRange);
+    const vacancy: ManagerJobVacancy = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("manager_job"),
+      openedOn: input.openedOn ?? this.clock.now(),
+      status: input.status ?? "OPEN",
+    };
+    this.managerJobVacancies.set(vacancy.id, vacancy);
+    this.assertInvariants();
+    return structuredClone(vacancy);
+  }
+
+  getManagerJobVacancies(status: ManagerJobVacancyStatus = "OPEN"): ManagerJobVacancy[] {
+    return [...this.managerJobVacancies.values()]
+      .filter((vacancy) => vacancy.status === status)
+      .sort((a, b) => a.openedOn.localeCompare(b.openedOn) || a.id.localeCompare(b.id))
+      .map((vacancy) => structuredClone(vacancy));
+  }
+
+  applyForManagerJob(input: ManagerJobApplicationInput): ManagerJobApplication {
+    const manager = this.requireManager(input.managerId);
+    const vacancy = this.requireManagerJobVacancy(input.vacancyId);
+    if (manager.status === "RETIRED") throw new Error(`Retired manager cannot apply for a job: ${manager.id}`);
+    if (vacancy.status !== "OPEN") throw new Error(`Manager job vacancy is not open: ${vacancy.id}`);
+    const existing = [...this.managerJobApplications.values()].find(
+      (application) => application.managerId === manager.id && application.vacancyId === vacancy.id && application.status !== "WITHDRAWN",
+    );
+    if (existing) throw new Error(`Manager already applied for this job: ${manager.id}`);
+    const application: ManagerJobApplication = {
+      id: input.id ?? this.ids.nextId("manager_application"),
+      vacancyId: vacancy.id,
+      managerId: manager.id,
+      organizationId: vacancy.organizationId,
+      teamId: vacancy.teamId,
+      appliedOn: this.clock.now(),
+      status: "APPLIED",
+      ...(input.desiredSalary !== undefined ? { desiredSalary: input.desiredSalary } : {}),
+      ...(input.desiredYears !== undefined ? { desiredYears: input.desiredYears } : {}),
+      reason: input.reason ?? "감독직 지원",
+    };
+    this.managerJobApplications.set(application.id, application);
+    this.assertInvariants();
+    return structuredClone(application);
+  }
+
+  evaluateManagerApplication(applicationId: EntityId): ManagerApplicationEvaluation {
+    const application = this.requireManagerJobApplication(applicationId);
+    const manager = this.requireManager(application.managerId);
+    const vacancy = this.requireManagerJobVacancy(application.vacancyId);
+    const stats = manager.careerStats;
+    const winRateScore = stats.games > 0 ? stats.winningPercentage * 100 : 45;
+    const desiredSalary = application.desiredSalary ?? vacancy.salaryRange.min;
+    const salaryPressure = Math.max(0, (desiredSalary - vacancy.salaryRange.max) / Math.max(1, vacancy.salaryRange.max) * 28);
+    const minimumPenalty = vacancy.minimumReputation && manager.reputation < vacancy.minimumReputation ? 35 : 0;
+    const preferredBonus = vacancy.preferredReputation ? Math.min(18, Math.max(0, manager.reputation - vacancy.preferredReputation) * 0.45) : 0;
+    const score = this.roundRate(
+      manager.reputation * 0.55 +
+        winRateScore * 0.18 +
+        stats.championships * 4 +
+        preferredBonus -
+        salaryPressure -
+        minimumPenalty +
+        this.rng.next() * 4,
+    );
+    const decision: ManagerApplicationDecision = score >= 64 ? "OFFER" : score < 42 ? "REJECT" : "HOLD";
+    return {
+      applicationId,
+      managerId: manager.id,
+      organizationId: vacancy.organizationId,
+      decision,
+      score,
+      reason: decision === "OFFER" ? "구단 기준에 부합" : decision === "REJECT" ? "현재 기준과 차이가 큼" : "추가 검토",
+    };
+  }
+
+  makeManagerOffer(input: ManagerContractOfferInput): ManagerContractOffer {
+    const manager = this.requireManager(input.managerId);
+    this.requireOrganization(input.organizationId);
+    if (manager.status === "RETIRED") throw new Error(`Retired manager cannot receive an offer: ${manager.id}`);
+    let vacancy: ManagerJobVacancy | undefined;
+    if (input.vacancyId) {
+      vacancy = this.requireManagerJobVacancy(input.vacancyId);
+      if (vacancy.organizationId !== input.organizationId) throw new Error(`Offer organization does not match vacancy: ${input.vacancyId}`);
+    }
+    const teamId = input.teamId ?? vacancy?.teamId;
+    if (teamId) {
+      const team = this.requireTeam(teamId);
+      if (team.organizationId !== input.organizationId) throw new Error(`Manager offer team does not belong to organization: ${teamId}`);
+    }
+    if (!Number.isFinite(input.salary) || input.salary < 0) throw new Error("Manager offer salary must be non-negative");
+    const years = input.years ?? vacancy?.contractYearsRange.min ?? 1;
+    if (!Number.isInteger(years) || years <= 0) throw new Error("Manager offer years must be a positive integer");
+    const startDate = input.startDate ?? this.clock.now();
+    const endDate = input.endDate ?? this.addDays(startDate, years * 365 - 1);
+    if (endDate < startDate) throw new Error("Manager offer endDate must be >= startDate");
+    const offer: ManagerContractOffer = {
+      id: input.id ?? this.ids.nextId("manager_offer"),
+      ...(input.vacancyId ? { vacancyId: input.vacancyId } : {}),
+      managerId: manager.id,
+      organizationId: input.organizationId,
+      ...(teamId ? { teamId } : {}),
+      role: input.role ?? "MANAGER",
+      salary: input.salary,
+      currency: input.currency,
+      years,
+      startDate,
+      endDate,
+      status: input.status ?? "PENDING",
+      offeredOn: input.offeredOn ?? this.clock.now(),
+      expectations: input.expectations ?? vacancy?.expectations ?? "안정적인 팀 운영",
+      reason: input.reason ?? "감독 계약 제안",
+    };
+    this.managerContractOffers.set(offer.id, offer);
+    const application = input.vacancyId
+      ? [...this.managerJobApplications.values()].find((item) => item.vacancyId === input.vacancyId && item.managerId === manager.id && item.status === "APPLIED")
+      : undefined;
+    if (application) application.status = "OFFERED";
+    this.record("MANAGER_CONTRACT_OFFERED", {
+      subjectId: manager.id,
+      ...(teamId ? { teamId } : {}),
+      reason: offer.reason,
+      payload: { offerId: offer.id, organizationId: offer.organizationId, salary: offer.salary, years: offer.years },
+    });
+    this.assertInvariants();
+    return structuredClone(offer);
   }
 
   movePlayer(playerId: EntityId, toTeamId: EntityId, reason: string): void {
@@ -2061,12 +2277,237 @@ export class LeagueWorld {
     this.assertInvariants();
   }
 
+  acceptManagerOffer(offerId: EntityId): ManagerContract {
+    const offer = this.requireManagerContractOffer(offerId);
+    if (offer.status !== "PENDING") throw new Error(`Manager offer is not pending: ${offerId}`);
+    const manager = this.requireManager(offer.managerId);
+    if (manager.status === "RETIRED") throw new Error(`Retired manager cannot accept an offer: ${manager.id}`);
+    if (offer.teamId) {
+      const existing = this.managerForTeam(offer.teamId);
+      if (existing && existing.id !== manager.id) {
+        throw new Error(`Team already has an active manager: ${offer.teamId}`);
+      }
+    }
+    const previousOrganizationId = manager.currentOrganizationId;
+    const previousTeamId = manager.currentTeamId;
+    this.closeActiveManagerContract(manager, previousTeamId === offer.teamId ? "재계약" : "이직");
+    this.endOpenCareerEntry(manager, previousTeamId === offer.teamId ? "재계약" : "이직");
+    const contract: ManagerContract = {
+      id: this.ids.nextId("manager_contract"),
+      managerId: manager.id,
+      organizationId: offer.organizationId,
+      ...(offer.teamId ? { teamId: offer.teamId } : {}),
+      role: offer.role,
+      startDate: offer.startDate,
+      endDate: offer.endDate,
+      salary: offer.salary,
+      currency: offer.currency,
+      status: "ACTIVE",
+    };
+    manager.contracts.push(contract);
+    this.managerContracts.set(contract.id, contract);
+    this.assignManagerEmployment(manager, offer.organizationId, offer.teamId, offer.role, previousTeamId === offer.teamId ? "감독 재계약" : "감독 제안 수락");
+    offer.status = "ACCEPTED";
+    for (const other of this.managerContractOffers.values()) {
+      if (other.managerId === manager.id && other.id !== offer.id && other.status === "PENDING") {
+        other.status = "REJECTED";
+      }
+    }
+    if (offer.vacancyId) {
+      const vacancy = this.requireManagerJobVacancy(offer.vacancyId);
+      vacancy.status = "FILLED";
+      for (const application of this.managerJobApplications.values()) {
+        if (application.vacancyId === offer.vacancyId) {
+          application.status = application.managerId === manager.id ? "ACCEPTED" : "REJECTED";
+        }
+      }
+    }
+    const eventType = previousTeamId === offer.teamId ? "MANAGER_CONTRACT_RENEWED" : previousTeamId ? "MANAGER_MOVED_TEAM" : "MANAGER_HIRED";
+    this.record(eventType, {
+      subjectId: manager.id,
+      ...(offer.teamId ? { teamId: offer.teamId } : {}),
+      reason: eventType === "MANAGER_CONTRACT_RENEWED" ? "감독 재계약" : "감독 계약 수락",
+      payload: { contractId: contract.id, previousOrganizationId, previousTeamId, organizationId: offer.organizationId, teamId: offer.teamId },
+    });
+    this.assertInvariants();
+    return structuredClone(contract);
+  }
+
+  rejectManagerOffer(offerId: EntityId, reason = "감독 제안 거절"): ManagerContractOffer {
+    const offer = this.requireManagerContractOffer(offerId);
+    if (offer.status !== "PENDING") throw new Error(`Manager offer is not pending: ${offerId}`);
+    offer.status = "REJECTED";
+    this.record("MANAGER_BECAME_UNEMPLOYED", {
+      subjectId: offer.managerId,
+      reason,
+      payload: { offerId, organizationId: offer.organizationId, rejectedOffer: true },
+    });
+    this.assertInvariants();
+    return structuredClone(offer);
+  }
+
+  withdrawManagerApplication(applicationId: EntityId, reason = "감독직 지원 철회"): ManagerJobApplication {
+    const application = this.requireManagerJobApplication(applicationId);
+    if (application.status !== "APPLIED" && application.status !== "OFFERED") {
+      throw new Error(`Manager application cannot be withdrawn: ${application.status}`);
+    }
+    application.status = "WITHDRAWN";
+    application.reason = `${application.reason}; ${reason}`;
+    this.assertInvariants();
+    return structuredClone(application);
+  }
+
+  resignManager(managerId: EntityId, reason = "자진 사임"): void {
+    const manager = this.requireManager(managerId);
+    if (manager.status !== "EMPLOYED") throw new Error(`Only employed managers can resign: ${manager.id}`);
+    const fromTeamId = manager.currentTeamId;
+    const fromOrganizationId = manager.currentOrganizationId;
+    this.closeActiveManagerContract(manager, reason);
+    delete manager.currentTeamId;
+    delete manager.currentOrganizationId;
+    manager.status = "UNEMPLOYED";
+    manager.employmentStatus = "UNEMPLOYED";
+    this.replaceCareerEntry(manager, "MANAGER", {
+      role: "MANAGER",
+      status: manager.status,
+      reason,
+      organizationNameSnapshot: "Unemployed",
+    });
+    this.record("MANAGER_RESIGNED", {
+      subjectId: manager.id,
+      reason,
+      payload: { fromTeamId, fromOrganizationId },
+    });
+    this.record("MANAGER_BECAME_UNEMPLOYED", {
+      subjectId: manager.id,
+      reason,
+      payload: { fromTeamId, fromOrganizationId },
+    });
+    this.openVacancyForDepartedManager(fromOrganizationId, fromTeamId, "사임 후 감독 공석");
+    this.assertInvariants();
+  }
+
+  sackManager(managerId: EntityId, reason = "구단 경질"): void {
+    const manager = this.requireManager(managerId);
+    if (manager.status !== "EMPLOYED") throw new Error(`Only employed managers can be sacked: ${manager.id}`);
+    const fromTeamId = manager.currentTeamId;
+    const fromOrganizationId = manager.currentOrganizationId;
+    this.closeActiveManagerContract(manager, reason);
+    delete manager.currentTeamId;
+    delete manager.currentOrganizationId;
+    manager.status = "UNEMPLOYED";
+    manager.employmentStatus = "UNEMPLOYED";
+    this.replaceCareerEntry(manager, "MANAGER", {
+      role: "MANAGER",
+      status: manager.status,
+      reason,
+      organizationNameSnapshot: "Unemployed",
+    });
+    this.record("MANAGER_SACKED", {
+      subjectId: manager.id,
+      reason,
+      payload: { fromTeamId, fromOrganizationId },
+    });
+    this.record("MANAGER_BECAME_UNEMPLOYED", {
+      subjectId: manager.id,
+      reason,
+      payload: { fromTeamId, fromOrganizationId },
+    });
+    this.openVacancyForDepartedManager(fromOrganizationId, fromTeamId, "경질 후 감독 공석");
+    this.assertInvariants();
+  }
+
+  renewManagerContract(managerId: EntityId, years: number, salary?: number): ManagerContractOffer {
+    const manager = this.requireManager(managerId);
+    const active = this.activeManagerContract(manager);
+    if (!active) throw new Error(`Manager has no active contract to renew: ${manager.id}`);
+    return this.makeManagerOffer({
+      managerId,
+      organizationId: active.organizationId,
+      ...(active.teamId ? { teamId: active.teamId } : {}),
+      role: active.role,
+      salary: salary ?? active.salary,
+      currency: active.currency,
+      years,
+      startDate: this.addDays(active.endDate, 1),
+      endDate: this.addDays(active.endDate, years * 365),
+      reason: "감독 재계약 제안",
+      expectations: "기존 프로젝트 지속",
+    });
+  }
+
+  expireManagerContracts(onDate: ISODate = this.clock.now()): void {
+    for (const manager of this.managers.values()) {
+      const active = this.activeManagerContract(manager);
+      if (!active || active.endDate >= onDate) continue;
+      const fromTeamId = manager.currentTeamId;
+      const fromOrganizationId = manager.currentOrganizationId;
+      active.status = "EXPIRED";
+      const mapContract = this.managerContracts.get(active.id);
+      if (mapContract) mapContract.status = "EXPIRED";
+      delete manager.currentTeamId;
+      delete manager.currentOrganizationId;
+      manager.status = "UNEMPLOYED";
+      manager.employmentStatus = "UNEMPLOYED";
+      this.replaceCareerEntry(manager, "MANAGER", {
+        role: active.role,
+        status: manager.status,
+        reason: "감독 계약 만료",
+        organizationNameSnapshot: "Unemployed",
+      });
+      this.record("MANAGER_BECAME_UNEMPLOYED", {
+        subjectId: manager.id,
+        reason: "감독 계약 만료",
+        payload: { fromTeamId, fromOrganizationId, contractId: active.id },
+      }, onDate);
+      this.openVacancyForDepartedManager(fromOrganizationId, fromTeamId, "계약 만료 후 감독 공석");
+    }
+    this.assertInvariants();
+  }
+
+  updateManagerReputation(managerId: EntityId, reason = "감독 평판 갱신"): number {
+    const manager = this.requireManager(managerId);
+    const stats = manager.careerStats;
+    const winRate = stats.games > 0 ? stats.winningPercentage * 100 : manager.reputation;
+    manager.reputation = this.clampRating(manager.reputation * 0.72 + winRate * 0.2 + stats.championships * 4 + this.rng.int(-2, 2));
+    this.record("MANAGER_MOVED", {
+      subjectId: manager.id,
+      reason,
+      payload: { reputation: manager.reputation },
+    });
+    this.assertInvariants();
+    return manager.reputation;
+  }
+
+  updateBoardConfidence(managerId: EntityId, scoreDelta: number, reason = "구단 신뢰도 갱신"): BoardConfidence {
+    const manager = this.requireManager(managerId);
+    if (!manager.currentOrganizationId) throw new Error(`Manager has no organization for board confidence: ${manager.id}`);
+    const previous = manager.boardConfidence?.score ?? 60;
+    manager.boardConfidence = {
+      managerId: manager.id,
+      organizationId: manager.currentOrganizationId,
+      ...(manager.currentTeamId ? { teamId: manager.currentTeamId } : {}),
+      score: this.clampRating(previous + scoreDelta),
+      updatedOn: this.clock.now(),
+      reason,
+    };
+    this.assertInvariants();
+    return structuredClone(manager.boardConfidence);
+  }
+
   hireManager(managerId: EntityId, teamId: EntityId, reason: string): void {
     const manager = this.requireManager(managerId);
-    this.requireTeam(teamId);
+    const team = this.requireTeam(teamId);
+    const organizationId = this.requireTeamOrganization(team);
+    const existing = this.managerForTeam(teamId);
+    if (existing && existing.id !== manager.id) throw new Error(`Team already has an active manager: ${teamId}`);
     const previousTeamId = manager.currentTeamId;
+    const previousOrganizationId = manager.currentOrganizationId;
+    this.closeActiveManagerContract(manager, reason);
     manager.currentTeamId = teamId;
+    manager.currentOrganizationId = organizationId;
     manager.status = "EMPLOYED";
+    manager.employmentStatus = "EMPLOYED";
     this.replaceCareerEntry(manager, "MANAGER", {
       teamId,
       role: "MANAGER",
@@ -2078,15 +2519,20 @@ export class LeagueWorld {
       subjectId: manager.id,
       teamId,
       reason,
-      payload: { fromTeamId: previousTeamId, toTeamId: teamId },
+      payload: { fromTeamId: previousTeamId, toTeamId: teamId, previousOrganizationId, organizationId },
     });
+    this.assertInvariants();
   }
 
   fireManager(managerId: EntityId, reason: string): void {
     const manager = this.requireManager(managerId);
     const fromTeamId = manager.currentTeamId;
+    const fromOrganizationId = manager.currentOrganizationId;
+    this.closeActiveManagerContract(manager, reason);
     delete manager.currentTeamId;
+    delete manager.currentOrganizationId;
     manager.status = "UNEMPLOYED";
+    manager.employmentStatus = "UNEMPLOYED";
     this.replaceCareerEntry(manager, "MANAGER", {
       role: "MANAGER",
       status: manager.status,
@@ -2096,15 +2542,20 @@ export class LeagueWorld {
     this.record("MANAGER_FIRED", {
       subjectId: manager.id,
       reason,
-      payload: { fromTeamId },
+      payload: { fromTeamId, fromOrganizationId },
     });
+    this.assertInvariants();
   }
 
   retireManager(managerId: EntityId, reason: string): void {
     const manager = this.requireManager(managerId);
     const fromTeamId = manager.currentTeamId;
+    const fromOrganizationId = manager.currentOrganizationId;
+    this.closeActiveManagerContract(manager, reason);
     delete manager.currentTeamId;
+    delete manager.currentOrganizationId;
     manager.status = "RETIRED";
+    manager.employmentStatus = "RETIRED";
     this.replaceCareerEntry(manager, "MANAGER", {
       role: "MANAGER",
       status: manager.status,
@@ -2114,16 +2565,19 @@ export class LeagueWorld {
     this.record("MANAGER_RETIRED", {
       subjectId: manager.id,
       reason,
-      payload: { fromTeamId },
+      payload: { fromTeamId, fromOrganizationId },
     });
+    this.assertInvariants();
   }
 
   advanceDay(options: AdvanceWorldOptions = {}): ISODate {
     const date = this.clock.advanceDays(1);
     this.progressSeasonStatuses();
     this.refreshPlayerAges();
+    this.refreshManagerAges();
     this.recoverPlayerGameConditions();
     this.expireContracts(this.clock.now());
+    this.expireManagerContracts(this.clock.now());
     if (options.injuries !== false) this.progressPlayerInjuries(options);
     if (options.development !== false) this.progressPlayerDevelopment();
     this.progressDailyCareers(options);
@@ -2274,16 +2728,27 @@ export class LeagueWorld {
 
     for (const manager of this.managers.values()) {
       this.validatePersonCareer(manager, "MANAGER", manager.status, manager.currentTeamId, issues);
+      this.validateManagerModel(manager, issues);
       if (manager.currentTeamId && !this.teams.has(manager.currentTeamId)) {
         issues.push(`Manager ${manager.id} has missing team ${manager.currentTeamId}`);
       }
-      if (manager.status === "EMPLOYED" && !manager.currentTeamId) {
-        issues.push(`Manager ${manager.id} is employed without a current team`);
+      if (manager.status !== manager.employmentStatus) {
+        issues.push(`Manager ${manager.id} status does not match employmentStatus`);
       }
-      if ((manager.status === "UNEMPLOYED" || manager.status === "RETIRED") && manager.currentTeamId) {
+      if (manager.status === "EMPLOYED" && !manager.currentOrganizationId) {
+        issues.push(`Manager ${manager.id} is employed without a current organization`);
+      }
+      if ((manager.status === "UNEMPLOYED" || manager.status === "RETIRED") && (manager.currentTeamId || manager.currentOrganizationId)) {
         issues.push(`Manager ${manager.id} is ${manager.status} but has a current team`);
       }
+      if (manager.currentTeamId) {
+        const team = this.teams.get(manager.currentTeamId);
+        if (team?.organizationId !== manager.currentOrganizationId) {
+          issues.push(`Manager ${manager.id} current team organization does not match currentOrganizationId`);
+        }
+      }
     }
+    this.validateManagerMarketInvariants(issues);
 
     return issues;
   }
@@ -3963,6 +4428,112 @@ export class LeagueWorld {
     return player.contracts.find((contract) => contract.contractStatus === "ACTIVE");
   }
 
+  private activeManagerContract(manager: Manager): ManagerContract | undefined {
+    return manager.contracts.find((contract) => contract.status === "ACTIVE");
+  }
+
+  private closeActiveManagerContract(manager: Manager, reason: string): void {
+    const active = this.activeManagerContract(manager);
+    if (!active) return;
+    active.status = "TERMINATED";
+    const mapContract = this.managerContracts.get(active.id);
+    if (mapContract) mapContract.status = "TERMINATED";
+    this.annotateOpenManagerCareerStats(manager, reason);
+  }
+
+  private assignManagerEmployment(
+    manager: Manager,
+    organizationId: EntityId,
+    teamId: EntityId | undefined,
+    role: ManagerRole,
+    reason: string,
+  ): void {
+    manager.currentOrganizationId = organizationId;
+    if (teamId) manager.currentTeamId = teamId;
+    else delete manager.currentTeamId;
+    manager.status = "EMPLOYED";
+    manager.employmentStatus = "EMPLOYED";
+    manager.boardConfidence = {
+      managerId: manager.id,
+      organizationId,
+      ...(teamId ? { teamId } : {}),
+      score: manager.boardConfidence?.organizationId === organizationId ? manager.boardConfidence.score : 60,
+      updatedOn: this.clock.now(),
+      reason: "구단 신뢰도 시작",
+    };
+    this.startCareerEntry(manager, "MANAGER", {
+      ...(teamId ? { teamId } : {}),
+      ...(!teamId ? { organizationNameSnapshot: this.requireOrganization(organizationId).name } : {}),
+      role,
+      status: manager.status,
+      reason,
+    });
+  }
+
+  private annotateOpenManagerCareerStats(manager: Manager, endReason: string): void {
+    const open = [...manager.careerEntries].reverse().find((entry) => !entry.endDate);
+    if (!open) return;
+    open.games = manager.careerStats.games;
+    open.wins = manager.careerStats.wins;
+    open.losses = manager.careerStats.losses;
+    open.draws = manager.careerStats.draws;
+    open.winningPercentage = manager.careerStats.winningPercentage;
+    open.championships = manager.careerStats.championships;
+    open.endReason = endReason;
+  }
+
+  private managerForTeam(teamId: EntityId): Manager | undefined {
+    return [...this.managers.values()].find(
+      (manager) => manager.status === "EMPLOYED" && manager.currentTeamId === teamId,
+    );
+  }
+
+  private openVacancyForDepartedManager(
+    organizationId: EntityId | undefined,
+    teamId: EntityId | undefined,
+    expectations: string,
+  ): void {
+    if (!organizationId || !teamId) return;
+    if ([...this.managerJobVacancies.values()].some((vacancy) => vacancy.teamId === teamId && vacancy.status === "OPEN")) {
+      return;
+    }
+    const vacancy: ManagerJobVacancy = {
+      id: this.ids.nextId("manager_job"),
+      organizationId,
+      teamId,
+      openedOn: this.clock.now(),
+      status: "OPEN",
+      minimumReputation: 35,
+      preferredReputation: 60,
+      salaryRange: { min: 300_000, max: 900_000, currency: "USD" },
+      contractYearsRange: { min: 1, max: 3 },
+      expectations,
+    };
+    this.managerJobVacancies.set(vacancy.id, vacancy);
+  }
+
+  private assertSalaryRange(range: ManagerJobVacancy["salaryRange"]): void {
+    if (!Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min < 0 || range.max < range.min) {
+      throw new Error("Manager vacancy salaryRange is invalid");
+    }
+    if (!range.currency) throw new Error("Manager vacancy salaryRange requires currency");
+  }
+
+  private assertYearsRange(range: ManagerJobVacancy["contractYearsRange"]): void {
+    if (!Number.isInteger(range.min) || !Number.isInteger(range.max) || range.min <= 0 || range.max < range.min) {
+      throw new Error("Manager vacancy contractYearsRange is invalid");
+    }
+  }
+
+  private assertValidManagerContractShape(contract: Pick<ManagerContract, "startDate" | "endDate" | "salary" | "currency" | "status">): void {
+    if (contract.endDate < contract.startDate) throw new Error("Manager contract endDate must be >= startDate");
+    if (!Number.isFinite(contract.salary) || contract.salary < 0) throw new Error("Manager contract salary must be non-negative");
+    if (!contract.currency) throw new Error("Manager contract currency is required");
+    if (!["ACTIVE", "EXPIRED", "TERMINATED"].includes(contract.status)) {
+      throw new Error(`Invalid manager contract status: ${contract.status}`);
+    }
+  }
+
   private contractYears(startDate: ISODate, endDate: ISODate): number {
     const startYear = Number(startDate.slice(0, 4));
     const endYear = Number(endDate.slice(0, 4));
@@ -4774,6 +5345,12 @@ export class LeagueWorld {
     }
   }
 
+  private refreshManagerAges(): void {
+    for (const manager of this.managers.values()) {
+      manager.age = this.calculateAge(manager.birthDate);
+    }
+  }
+
   private recoverPlayerGameConditions(): void {
     for (const player of this.players.values()) {
       if (player.status !== "RETIRED") this.recoverDailyFatigue(player);
@@ -4916,6 +5493,61 @@ export class LeagueWorld {
     };
     normalized.age = this.calculateAge(normalized.birthDate);
     return normalized;
+  }
+
+  private normalizeManagerInput(manager: ManagerInput): Manager {
+    const currentTeam = manager.currentTeamId ? this.requireTeam(manager.currentTeamId) : undefined;
+    const currentOrganizationId = manager.currentOrganizationId ?? currentTeam?.organizationId;
+    if (manager.currentTeamId && currentTeam?.organizationId !== currentOrganizationId) {
+      throw new Error(`Manager currentOrganizationId does not match currentTeamId: ${manager.id}`);
+    }
+    if (currentOrganizationId) this.requireOrganization(currentOrganizationId);
+    const status = manager.employmentStatus ?? manager.status;
+    if (status === "EMPLOYED" && !currentOrganizationId) {
+      throw new Error(`Employed manager requires a current organization: ${manager.id}`);
+    }
+    const stored: Manager = {
+      ...structuredClone(manager),
+      age: manager.age ?? this.calculateAge(manager.birthDate),
+      nationality: manager.nationality ?? manager.nationalityCode,
+      employmentStatus: status,
+      status,
+      ...(currentOrganizationId ? { currentOrganizationId } : {}),
+      contracts: structuredClone(manager.contracts ?? []),
+      careerStats: structuredClone(manager.careerStats ?? this.emptyManagerCareerStats()),
+      ...(manager.boardConfidence
+        ? { boardConfidence: structuredClone(manager.boardConfidence) }
+        : status === "EMPLOYED" && currentOrganizationId
+          ? {
+              boardConfidence: {
+                managerId: manager.id,
+                organizationId: currentOrganizationId,
+                ...(manager.currentTeamId ? { teamId: manager.currentTeamId } : {}),
+                score: 60,
+                updatedOn: this.clock.now(),
+                reason: "초기 구단 신뢰도",
+              },
+            }
+          : {}),
+      careerEntries: structuredClone(manager.careerEntries ?? []),
+    };
+    stored.reputation = this.clampRating(stored.reputation);
+    stored.age = this.calculateAge(stored.birthDate);
+    for (const contract of stored.contracts) {
+      this.managerContracts.set(contract.id, contract);
+    }
+    return stored;
+  }
+
+  private emptyManagerCareerStats(): Manager["careerStats"] {
+    return {
+      games: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      winningPercentage: 0,
+      championships: 0,
+    };
   }
 
   private normalizeBattingRatings(
@@ -5391,6 +6023,135 @@ export class LeagueWorld {
     }
   }
 
+  private validateManagerModel(manager: Manager, issues: string[]): void {
+    const expectedAge = this.calculateAge(manager.birthDate);
+    if (!Number.isInteger(manager.age) || manager.age < 0 || manager.age !== expectedAge) {
+      issues.push(`Manager ${manager.id} age ${manager.age} does not match birth date ${manager.birthDate}`);
+    }
+    if (!manager.nationality || !manager.nationalityCode) {
+      issues.push(`Manager ${manager.id} must have nationality and nationalityCode`);
+    }
+    this.validateRating(manager.reputation, `Manager ${manager.id} reputation`, issues);
+    const stats = manager.careerStats;
+    if (
+      stats.games < 0 ||
+      stats.wins < 0 ||
+      stats.losses < 0 ||
+      stats.draws < 0 ||
+      stats.championships < 0 ||
+      stats.wins + stats.losses + stats.draws > stats.games
+    ) {
+      issues.push(`Manager ${manager.id} careerStats are inconsistent`);
+    }
+    if (stats.winningPercentage < 0 || stats.winningPercentage > 1) {
+      issues.push(`Manager ${manager.id} winningPercentage must be between 0 and 1`);
+    }
+    if (manager.boardConfidence) {
+      if (manager.boardConfidence.managerId !== manager.id) {
+        issues.push(`Manager ${manager.id} boardConfidence managerId mismatch`);
+      }
+      if (!this.organizations.has(manager.boardConfidence.organizationId)) {
+        issues.push(`Manager ${manager.id} boardConfidence has missing organization`);
+      }
+      if (manager.boardConfidence.teamId && !this.teams.has(manager.boardConfidence.teamId)) {
+        issues.push(`Manager ${manager.id} boardConfidence has missing team`);
+      }
+      this.validateRating(manager.boardConfidence.score, `Manager ${manager.id} boardConfidence`, issues);
+      if (manager.status === "EMPLOYED" && manager.boardConfidence.organizationId !== manager.currentOrganizationId) {
+        issues.push(`Manager ${manager.id} boardConfidence organization does not match currentOrganizationId`);
+      }
+    }
+    let activeContracts = 0;
+    for (const contract of manager.contracts) {
+      if (contract.managerId !== manager.id) issues.push(`Manager contract ${contract.id} points to another manager`);
+      if (!this.organizations.has(contract.organizationId)) issues.push(`Manager contract ${contract.id} has missing organization`);
+      if (contract.teamId && !this.teams.has(contract.teamId)) issues.push(`Manager contract ${contract.id} has missing team`);
+      if (contract.teamId) {
+        const team = this.teams.get(contract.teamId);
+        if (team?.organizationId !== contract.organizationId) {
+          issues.push(`Manager contract ${contract.id} team organization mismatch`);
+        }
+      }
+      if (contract.endDate < contract.startDate) issues.push(`Manager contract ${contract.id} endDate is before startDate`);
+      if (!Number.isFinite(contract.salary) || contract.salary < 0) issues.push(`Manager contract ${contract.id} salary must be non-negative`);
+      if (!contract.currency) issues.push(`Manager contract ${contract.id} must have currency`);
+      if (!["ACTIVE", "EXPIRED", "TERMINATED"].includes(contract.status)) {
+        issues.push(`Manager contract ${contract.id} has invalid status ${contract.status}`);
+      }
+      if (contract.status === "ACTIVE") {
+        activeContracts += 1;
+        if (manager.currentOrganizationId !== contract.organizationId) {
+          issues.push(`Manager contract ${contract.id} organization does not match manager currentOrganizationId`);
+        }
+        if (contract.teamId && manager.currentTeamId !== contract.teamId) {
+          issues.push(`Manager contract ${contract.id} team does not match manager currentTeamId`);
+        }
+      }
+    }
+    if (activeContracts > 1) issues.push(`Manager ${manager.id} has multiple active contracts`);
+  }
+
+  private validateManagerMarketInvariants(issues: string[]): void {
+    const teamManagers = new Map<EntityId, EntityId>();
+    for (const manager of this.managers.values()) {
+      if (manager.status === "EMPLOYED" && manager.currentTeamId) {
+        const previous = teamManagers.get(manager.currentTeamId);
+        if (previous) issues.push(`Team ${manager.currentTeamId} has multiple active managers: ${previous}, ${manager.id}`);
+        teamManagers.set(manager.currentTeamId, manager.id);
+      }
+    }
+    for (const contract of this.managerContracts.values()) {
+      const manager = this.managers.get(contract.managerId);
+      if (!manager) {
+        issues.push(`Manager contract ${contract.id} has missing manager ${contract.managerId}`);
+        continue;
+      }
+      if (!manager.contracts.some((item) => item.id === contract.id)) {
+        issues.push(`Manager contract ${contract.id} is not mirrored on manager ${manager.id}`);
+      }
+      if (!this.organizations.has(contract.organizationId)) issues.push(`Manager contract ${contract.id} has missing organization`);
+      if (contract.status === "ACTIVE" && manager.currentOrganizationId !== contract.organizationId) {
+        issues.push(`Manager contract ${contract.id} active organization mismatch`);
+      }
+    }
+    for (const vacancy of this.managerJobVacancies.values()) {
+      if (!this.organizations.has(vacancy.organizationId)) issues.push(`Manager vacancy ${vacancy.id} has missing organization`);
+      const team = this.teams.get(vacancy.teamId);
+      if (!team) issues.push(`Manager vacancy ${vacancy.id} has missing team`);
+      if (team?.organizationId !== vacancy.organizationId) issues.push(`Manager vacancy ${vacancy.id} team organization mismatch`);
+      if (!["OPEN", "FILLED", "CLOSED"].includes(vacancy.status)) issues.push(`Manager vacancy ${vacancy.id} has invalid status`);
+      this.validateRating(vacancy.minimumReputation ?? 0, `Manager vacancy ${vacancy.id} minimumReputation`, issues);
+      this.validateRating(vacancy.preferredReputation ?? 0, `Manager vacancy ${vacancy.id} preferredReputation`, issues);
+      if (vacancy.salaryRange.min < 0 || vacancy.salaryRange.max < vacancy.salaryRange.min) {
+        issues.push(`Manager vacancy ${vacancy.id} salaryRange is invalid`);
+      }
+      if (vacancy.contractYearsRange.min <= 0 || vacancy.contractYearsRange.max < vacancy.contractYearsRange.min) {
+        issues.push(`Manager vacancy ${vacancy.id} contractYearsRange is invalid`);
+      }
+    }
+    for (const application of this.managerJobApplications.values()) {
+      if (!this.managerJobVacancies.has(application.vacancyId)) issues.push(`Manager application ${application.id} has missing vacancy`);
+      if (!this.managers.has(application.managerId)) issues.push(`Manager application ${application.id} has missing manager`);
+      if (!this.organizations.has(application.organizationId)) issues.push(`Manager application ${application.id} has missing organization`);
+      if (!this.teams.has(application.teamId)) issues.push(`Manager application ${application.id} has missing team`);
+      if (!["APPLIED", "OFFERED", "REJECTED", "WITHDRAWN", "ACCEPTED"].includes(application.status)) {
+        issues.push(`Manager application ${application.id} has invalid status ${application.status}`);
+      }
+    }
+    for (const offer of this.managerContractOffers.values()) {
+      if (!this.managers.has(offer.managerId)) issues.push(`Manager offer ${offer.id} has missing manager`);
+      if (!this.organizations.has(offer.organizationId)) issues.push(`Manager offer ${offer.id} has missing organization`);
+      if (offer.teamId && !this.teams.has(offer.teamId)) issues.push(`Manager offer ${offer.id} has missing team`);
+      if (offer.vacancyId && !this.managerJobVacancies.has(offer.vacancyId)) issues.push(`Manager offer ${offer.id} has missing vacancy`);
+      if (!["PENDING", "ACCEPTED", "REJECTED", "WITHDRAWN"].includes(offer.status)) {
+        issues.push(`Manager offer ${offer.id} has invalid status ${offer.status}`);
+      }
+      if (offer.endDate < offer.startDate) issues.push(`Manager offer ${offer.id} endDate is before startDate`);
+      if (!Number.isFinite(offer.salary) || offer.salary < 0) issues.push(`Manager offer ${offer.id} salary must be non-negative`);
+      if (!Number.isInteger(offer.years) || offer.years <= 0) issues.push(`Manager offer ${offer.id} years is invalid`);
+    }
+  }
+
   private validateRating(value: number, label: string, issues: string[]): void {
     if (!Number.isFinite(value) || value < 0 || value > 100) {
       issues.push(`${label} must be between 0 and 100`);
@@ -5533,6 +6294,24 @@ export class LeagueWorld {
   private requireContractOffer(id: EntityId): ContractOffer {
     const value = this.contractOffers.get(id);
     if (!value) throw new Error(`Contract offer not found: ${id}`);
+    return value;
+  }
+
+  private requireManagerJobVacancy(id: EntityId): ManagerJobVacancy {
+    const value = this.managerJobVacancies.get(id);
+    if (!value) throw new Error(`Manager job vacancy not found: ${id}`);
+    return value;
+  }
+
+  private requireManagerJobApplication(id: EntityId): ManagerJobApplication {
+    const value = this.managerJobApplications.get(id);
+    if (!value) throw new Error(`Manager job application not found: ${id}`);
+    return value;
+  }
+
+  private requireManagerContractOffer(id: EntityId): ManagerContractOffer {
+    const value = this.managerContractOffers.get(id);
+    if (!value) throw new Error(`Manager contract offer not found: ${id}`);
     return value;
   }
 

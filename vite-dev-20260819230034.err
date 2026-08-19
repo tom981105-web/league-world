@@ -169,3 +169,387 @@ The above error occurred in the <App> component.
 React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
 
 오후 11:16:42 [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
+오후 11:34:18 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:34:18 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:34:18 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:35:17 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+오후 11:35:17 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:35:17 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:35:22 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:35:22 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:35:22 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:35:36 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:35:36 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:35:36 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:35:59 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:35:59 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:35:59 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:36:07 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:36:07 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:36:07 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:36:18 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:36:18 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:36:18 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:36:28 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:36:28 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+      at async viteTransformMiddleware (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:25142:20)
+오후 11:36:28 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:37:06 [vite] Internal server error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+      at transformWithOxc (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4097:19)
+      at TransformPluginContext.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:4168:26)
+      at EnvironmentPluginContainer.transform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:30851:51)
+      at async loadAndTransform (file:///F:/claude/league-world-starter/league-world/node_modules/vite/dist/node/chunks/node.js:20619:26)
+오후 11:37:06 [vite] (client) Pre-transform error: Transform failed with 1 error:
+
+[31m[PARSE_ERROR] [0mExpected `,` or `)` but found `:`
+      [38;5;246m╭[0m[38;5;246m─[0m[38;5;246m[[0m src/engine/world.ts:2029:22 [38;5;246m][0m
+      [38;5;246m│[0m
+ [38;5;246m2029 │[0m [38;5;249m [0m[38;5;249m [0m[38;5;249mm[0m[38;5;249mo[0m[38;5;249mv[0m[38;5;249me[0m[38;5;249mP[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m([38;5;249mp[0m[38;5;249ml[0m[38;5;249ma[0m[38;5;249my[0m[38;5;249me[0m[38;5;249mr[0m[38;5;249mI[0m[38;5;249md[0m:[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mt[0m[38;5;249mo[0m[38;5;249mT[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249mm[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mE[0m[38;5;249mn[0m[38;5;249mt[0m[38;5;249mi[0m[38;5;249mt[0m[38;5;249my[0m[38;5;249mI[0m[38;5;249md[0m[38;5;249m,[0m[38;5;249m [0m[38;5;249mr[0m[38;5;249me[0m[38;5;249ma[0m[38;5;249ms[0m[38;5;249mo[0m[38;5;249mn[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249ms[0m[38;5;249mt[0m[38;5;249mr[0m[38;5;249mi[0m[38;5;249mn[0m[38;5;249mg[0m[38;5;249m)[0m[38;5;249m:[0m[38;5;249m [0m[38;5;249mv[0m[38;5;249mo[0m[38;5;249mi[0m[38;5;249md[0m[38;5;249m [0m[38;5;249m{[0m
+ [38;5;240m     │[0m             ┬        ┬  
+ [38;5;240m     │[0m             ╰─────────── Opened here
+ [38;5;240m     │[0m                      │  
+ [38;5;240m     │[0m                      ╰── `,` or `)` expected
+[38;5;246m──────╯[0m
+
+  Plugin: vite:oxc
+  File: F:/claude/league-world-starter/league-world/src/engine/world.ts
+오후 11:37:06 [vite] (client) [console.error] [vite] Failed to reload /src/web/App.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)
+오후 11:38:46 [vite] (client) [console.error] ReferenceError: managerContractLabel is not defined
+    at HomePage (http://127.0.0.1:5173/src/web/App.tsx?t=1787150326049:675:14)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:7994:27)
+
+The above error occurred in the <HomePage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:39:47 [vite] (client) [console.error] ReferenceError: managerContractLabel is not defined
+    at HomePage (http://127.0.0.1:5173/src/web/App.tsx?t=1787150387590:675:14)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:7994:27)
+
+The above error occurred in the <HomePage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:39:53 [vite] (client) [console.error] ReferenceError: managerContractLabel is not defined
+    at HomePage (http://127.0.0.1:5173/src/web/App.tsx?t=1787150393590:675:14)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:7994:27)
+
+The above error occurred in the <HomePage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:39:59 [vite] (client) [console.error] ReferenceError: managerContractLabel is not defined
+    at HomePage (http://127.0.0.1:5173/src/web/App.tsx?t=1787150398845:675:14)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:7994:27)
+
+The above error occurred in the <HomePage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:40:27 [vite] (client) [console.error] ReferenceError: managerContractLabel is not defined
+    at HomePage (http://127.0.0.1:5173/src/web/App.tsx?t=1787150427528:675:14)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4213:19)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:5569:16)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:6140:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:851:66)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8429:92)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8325:37)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:8309:6)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:7994:27)
+
+The above error occurred in the <HomePage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+

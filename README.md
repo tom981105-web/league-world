@@ -62,3 +62,16 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+## GitHub Pages 배포
+
+`main` 브랜치에 push하면 `.github/workflows/deploy-pages.yml`이 `typecheck`, `test`, `build`를 통과한 뒤 `dist`를 GitHub Pages artifact로 배포합니다.
+Vite production build는 project Pages 경로인 `/league-world/`를 base path로 사용합니다.
+
+예상 접속 주소:
+
+```text
+https://<github-user-or-org>.github.io/league-world/
+```
+
+GitHub 저장소 Settings에서 Pages source를 **GitHub Actions**로 설정해야 합니다.

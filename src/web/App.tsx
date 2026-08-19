@@ -60,6 +60,14 @@ type Page =
 
 const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "TEAMS", "PLAYERS", "PROSPECTS", "DRAFT", "MARKET", "EVENTS"];
 const bullpenRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
+type ManagerTab = "OVERVIEW" | "ROSTER" | "CAREER" | "JOBS" | "OFFERS";
+const managerTabs: Record<ManagerTab, string> = {
+  OVERVIEW: "개요",
+  ROSTER: "선수단",
+  CAREER: "커리어",
+  JOBS: "구직",
+  OFFERS: "제안",
+};
 
 export function App() {
   const [seed, setSeed] = useState(20270403);
@@ -70,6 +78,7 @@ export function App() {
   const [selectedPlayerId, setSelectedPlayerId] = useState<EntityId | undefined>();
   const [query, setQuery] = useState("");
   const [eventFilter, setEventFilter] = useState("ALL");
+  const [managerTab, setManagerTab] = useState<ManagerTab>("OVERVIEW");
   const [message, setMessage] = useState("시드 세계가 준비되었습니다.");
   const [offerEvaluations, setOfferEvaluations] = useState<Record<string, string>>({});
 
@@ -161,7 +170,7 @@ export function App() {
         <div className="status-line">{message}</div>
 
         {page === "HOME" && <HomePage data={data} world={world} setPage={setPage} setSelectedGameId={setSelectedGameId} setSelectedPlayerId={setSelectedPlayerId} />}
-        {page === "MANAGER" && <ManagerPage data={data} world={world} mutate={mutate} />}
+        {page === "MANAGER" && <ManagerPage data={data} world={world} mutate={mutate} tab={managerTab} setTab={setManagerTab} />}
         {page === "GAMES" && <GamesPage data={data} world={world} selectedGame={selectedGame} setSelectedGameId={setSelectedGameId} mutate={mutate} />}
         {page === "STANDINGS" && <StandingsPage data={data} />}
         {page === "TEAMS" && <TeamsPage data={data} world={world} setSelectedPlayerId={setSelectedPlayerId} setPage={setPage} />}
@@ -264,14 +273,32 @@ function HomePage({
       </Panel>
       <Panel title="내 구단">
         <Metric label="감독" value={localizeEntityName(data.userManager?.name) || "감독 없음"} />
-        <Metric label="팀" value={teamName(world, data.userTeam?.id) || "팀 없음"} />
+        <Metric label="소속" value={data.userManager?.currentOrganizationId ? orgName(world, data.userManager.currentOrganizationId) : "현재 소속 구단 없음"} />
+        <Metric label="팀" value={teamName(world, data.userTeam?.id) || "-"} />
+        <Metric label="계약" value={managerContractLabel(world, data.userManager?.id)} />
+        <Metric label="평판" value={reputationLabel(data.userManager?.reputation ?? 0)} />
+        <Metric label="구단 신뢰도" value={confidenceLabel(data.userManager?.boardConfidence?.score)} />
+        <Metric label="새 감독 제안" value={[...world.managerContractOffers.values()].filter((offer) => offer.managerId === data.userManager?.id && offer.status === "PENDING").length} />
         <Metric label="1군 등록 선수" value={data.myTopPlayers.length} />
+        {!data.userManager?.currentOrganizationId && <button onClick={() => setPage("MANAGER")}>감독직 알아보기</button>}
       </Panel>
     </section>
   );
 }
 
-function ManagerPage({ data, world, mutate }: { data: ViewModel; world: LeagueWorld; mutate: (label: string, action: () => void) => void }) {
+function ManagerPage({
+  data,
+  world,
+  mutate,
+  tab,
+  setTab,
+}: {
+  data: ViewModel;
+  world: LeagueWorld;
+  mutate: (label: string, action: () => void) => void;
+  tab: ManagerTab;
+  setTab: (tab: ManagerTab) => void;
+}) {
   const top = data.myTopPlayers;
   const futures = data.myFuturesPlayers;
   const rotation = data.userTeam ? world.pitchingRotations.get(data.userTeam.id) : undefined;
@@ -279,48 +306,112 @@ function ManagerPage({ data, world, mutate }: { data: ViewModel; world: LeagueWo
   const promoteId = futures[0]?.id;
   const demoteId = top.find((player) => player.primaryPosition !== "P")?.id;
   const pitcherId = top.find((player) => player.primaryPosition === "P")?.id;
+  const manager = data.userManager;
+  const contract = manager ? [...manager.contracts].reverse().find((item) => item.status === "ACTIVE") : undefined;
+  const jobs = world.getManagerJobVacancies();
+  const applications = [...world.managerJobApplications.values()].filter((application) => application.managerId === manager?.id);
+  const offers = [...world.managerContractOffers.values()].filter((offer) => offer.managerId === manager?.id).reverse();
+  const managerEvents = data.events.filter((event) => event.subjectId === manager?.id).slice(0, 8);
+  const leader = data.standings.find((record) => record.teamId === data.userTeam?.id);
 
   return (
     <section className="section-stack">
       <Panel title="감독">
         <div className="profile-strip">
-          <Metric label="이름" value={localizeEntityName(data.userManager?.name) || "감독 없음"} />
-          <Metric label="국적" value={countryLabel(data.userManager?.nationalityCode)} />
+          <Metric label="이름" value={localizeEntityName(manager?.name) || "감독 없음"} />
+          <Metric label="국적" value={countryLabel(manager?.nationalityCode)} />
+          <Metric label="나이" value={manager?.age ?? "-"} />
           <Metric label="팀" value={teamName(world, data.userTeam?.id) || "-"} />
-          <Metric label="커리어 기록" value={data.userManager?.careerEntries.length ?? 0} />
+          <Metric label="계약" value={contract ? `${formatDateKo(contract.startDate)} ~ ${formatDateKo(contract.endDate)}` : "-"} />
+          <Metric label="연봉" value={contract ? formatMoney(contract.salary, contract.currency) : "-"} />
+          <Metric label="평판" value={reputationLabel(manager?.reputation ?? 0)} />
+          <Metric label="구단 신뢰도" value={confidenceLabel(manager?.boardConfidence?.score)} />
+        </div>
+        <div className="filter-row">
+          {(Object.keys(managerTabs) as ManagerTab[]).map((item) => (
+            <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{managerTabs[item]}</button>
+          ))}
         </div>
       </Panel>
-      <Panel title="로스터 관리">
-        <div className="button-row">
-          <button disabled={!promoteId} onClick={() => promoteId && mutate("Called up a Futures player.", () => world.promotePlayer(promoteId, data.userTeam!.id, "웹 감독 콜업"))}>
-            <ChevronsUpDown size={16} />1군 등록
-          </button>
-          <button disabled={!demoteId || !data.myFuturesTeam} onClick={() => demoteId && data.myFuturesTeam && mutate("Moved a first-team player to Futures.", () => world.demotePlayer(demoteId, data.myFuturesTeam.id, "웹 감독 2군 이동"))}>
-            <ChevronsUpDown size={16} />2군 이동
-          </button>
-          <button disabled={!rotation} onClick={() => rotation && mutate("Rotated starting pitchers.", () => world.setPitchingRotation(rotation.teamId, [...rotation.orderedStartingPitcherIds].reverse()))}>
-            <RefreshCcw size={16} />로테이션 변경
-          </button>
-          <button disabled={!pitcherId || !data.userTeam} onClick={() => pitcherId && data.userTeam && mutate("Assigned bullpen role.", () => world.assignBullpenRole(data.userTeam!.id, pitcherId, ["CLOSER"]))}>
-            <Shield size={16} />마무리 지정
-          </button>
+      {tab === "OVERVIEW" && (
+        <div className="two-column">
+          <Panel title="감독 개요">
+            <Metric label="현재 조직" value={orgName(world, manager?.currentOrganizationId) || "무직"} />
+            <Metric label="현재 순위" value={leader ? `${data.standings.indexOf(leader) + 1}위` : "-"} />
+            <Metric label="통산 전적" value={manager ? `${manager.careerStats.wins}승 ${manager.careerStats.losses}패 ${manager.careerStats.draws}무` : "-"} />
+            <Metric label="승률" value={manager ? manager.careerStats.winningPercentage.toFixed(3) : "-"} />
+            <Metric label="우승" value={manager?.careerStats.championships ?? 0} />
+            <button disabled={!manager || manager.status !== "EMPLOYED"} onClick={() => manager && window.confirm("감독직에서 사임할까요?") && mutate("Manager resigned.", () => world.resignManager(manager.id, "웹 사용자 사임"))}>감독직 사임</button>
+          </Panel>
+          <Panel title="최근 감독 이벤트">
+            <CompactList empty="감독 이벤트가 없습니다.">
+              {managerEvents.map((event) => <EventLine key={event.id} event={event} world={world} />)}
+            </CompactList>
+          </Panel>
         </div>
-      </Panel>
-      <div className="two-column">
-        <RosterPanel title="1군 로스터" players={top} world={world} />
-        <RosterPanel title="퓨처스 로스터" players={futures} world={world} />
-      </div>
-      <Panel title="투수진">
-        <Table headers={["순번", "투수", "피로도", "준비도"]}>
-          {(rotation?.orderedStartingPitcherIds ?? []).map((id, index) => {
-            const player = world.players.get(id);
-            return <tr key={id}><td>{index + 1}</td><td>{player?.name}</td><td>{player?.gameCondition.fatigue}</td><td>{player?.gameCondition.readiness}</td></tr>;
-          })}
-        </Table>
-        <Table headers={["불펜", "역할"]}>
-          {bullpen.map((item) => <tr key={item.playerId}><td>{playerName(world, item.playerId)}</td><td>{item.roles.map(labelBullpenRole).join(", ")}</td></tr>)}
-        </Table>
-      </Panel>
+      )}
+      {tab === "ROSTER" && (
+        <>
+          <Panel title="로스터 관리">
+            <div className="button-row">
+              <button disabled={!promoteId || !data.userTeam} onClick={() => promoteId && data.userTeam && mutate("Called up a Futures player.", () => world.promotePlayer(promoteId, data.userTeam!.id, "웹 감독 콜업"))}><ChevronsUpDown size={16} />1군 등록</button>
+              <button disabled={!demoteId || !data.myFuturesTeam} onClick={() => {
+                const futuresTeam = data.myFuturesTeam;
+                if (demoteId && futuresTeam) mutate("Moved a first-team player to Futures.", () => world.demotePlayer(demoteId, futuresTeam.id, "웹 감독 2군 이동"));
+              }}><ChevronsUpDown size={16} />2군 이동</button>
+              <button disabled={!rotation} onClick={() => rotation && mutate("Rotated starting pitchers.", () => world.setPitchingRotation(rotation.teamId, [...rotation.orderedStartingPitcherIds].reverse()))}><RefreshCcw size={16} />로테이션 변경</button>
+              <button disabled={!pitcherId || !data.userTeam} onClick={() => pitcherId && data.userTeam && mutate("Assigned bullpen role.", () => world.assignBullpenRole(data.userTeam!.id, pitcherId, ["CLOSER"]))}><Shield size={16} />마무리 지정</button>
+            </div>
+          </Panel>
+          <div className="two-column">
+            <RosterPanel title="1군 로스터" players={top} world={world} />
+            <RosterPanel title="퓨처스 로스터" players={futures} world={world} />
+          </div>
+          <Panel title="투수진">
+            <Table headers={["순번", "투수", "피로도", "준비도"]}>
+              {(rotation?.orderedStartingPitcherIds ?? []).map((id, index) => {
+                const player = world.players.get(id);
+                return <tr key={id}><td>{index + 1}</td><td>{player?.name}</td><td>{player?.gameCondition.fatigue}</td><td>{player?.gameCondition.readiness}</td></tr>;
+              })}
+            </Table>
+            <Table headers={["불펜", "역할"]}>
+              {bullpen.map((item) => <tr key={item.playerId}><td>{playerName(world, item.playerId)}</td><td>{item.roles.map(labelBullpenRole).join(", ")}</td></tr>)}
+            </Table>
+          </Panel>
+        </>
+      )}
+      {tab === "CAREER" && (
+        <Panel title="감독 커리어">
+          <Table headers={["기간", "팀", "역할", "상태", "전적", "우승", "종료 사유"]}>
+            {(manager?.careerEntries ?? []).map((entry) => <tr key={entry.id}><td>{formatDateKo(entry.startDate)} ~ {formatDateKo(entry.endDate)}</td><td>{entry.teamId ? teamName(world, entry.teamId) : localizeEntityName(entry.organizationNameSnapshot)}</td><td>{labelManagerRole(entry.role)}</td><td>{labelStatus(entry.status)}</td><td>{entry.games ?? 0}경기 {entry.wins ?? 0}승 {entry.losses ?? 0}패</td><td>{entry.championships ?? 0}</td><td>{entry.endReason ?? entry.reason}</td></tr>)}
+          </Table>
+        </Panel>
+      )}
+      {tab === "JOBS" && (
+        <Panel title="감독 구직">
+          <Table headers={["국가", "리그", "구단", "예상 연봉", "계약 기간", "기대 성적", "요구 평판", "상태"]}>
+            {jobs.map((job) => {
+              const team = world.teams.get(job.teamId);
+              const league = team ? world.leagues.get(team.leagueId) : undefined;
+              const applied = applications.find((application) => application.vacancyId === job.id);
+              return <tr key={job.id}><td>{countryLabel(world.countries.get(world.organizations.get(job.organizationId)?.countryId ?? "")?.code)}</td><td>{localizeEntityName(league?.name)}</td><td>{teamName(world, job.teamId)}</td><td>{formatMoney(job.salaryRange.min, job.salaryRange.currency)} ~ {formatMoney(job.salaryRange.max, job.salaryRange.currency)}</td><td>{job.contractYearsRange.min}~{job.contractYearsRange.max}년</td><td>{job.expectations}</td><td>{job.minimumReputation ?? "-"}</td><td>{applied ? labelStatus(applied.status) : <button disabled={!manager} onClick={() => manager && mutate("Applied for manager job.", () => {
+                const application = world.applyForManagerJob({ managerId: manager.id, vacancyId: job.id, desiredSalary: job.salaryRange.min, desiredYears: job.contractYearsRange.min });
+                const evaluation = world.evaluateManagerApplication(application.id);
+                if (evaluation.decision === "OFFER") {
+                  world.makeManagerOffer({ managerId: manager.id, vacancyId: job.id, organizationId: job.organizationId, teamId: job.teamId, salary: job.salaryRange.min, currency: job.salaryRange.currency, years: job.contractYearsRange.min });
+                }
+              })}>지원하기</button>}</td></tr>;
+            })}
+          </Table>
+        </Panel>
+      )}
+      {tab === "OFFERS" && (
+        <Panel title="감독 제안">
+          <Table headers={["구단", "역할", "연봉", "기간", "목표", "상태", "결정"]}>
+            {offers.map((offer) => <tr key={offer.id}><td>{orgName(world, offer.organizationId)}</td><td>{labelManagerRole(offer.role)}</td><td>{formatMoney(offer.salary, offer.currency)}</td><td>{offer.years}년</td><td>{offer.expectations}</td><td>{labelStatus(offer.status)}</td><td>{offer.status === "PENDING" ? <div className="button-row"><button onClick={() => mutate("Manager offer accepted.", () => world.acceptManagerOffer(offer.id))}>수락</button><button onClick={() => mutate("Manager offer rejected.", () => world.rejectManagerOffer(offer.id))}>거절</button></div> : "-"}</td></tr>)}
+          </Table>
+        </Panel>
+      )}
     </section>
   );
 }
@@ -334,7 +425,7 @@ function GamesPage({
 }: {
   data: ViewModel;
   world: LeagueWorld;
-  selectedGame?: GameFixture;
+  selectedGame: GameFixture | undefined;
   setSelectedGameId: (id: EntityId) => void;
   mutate: (label: string, action: () => void) => void;
 }) {
@@ -425,6 +516,10 @@ function TeamsPage({ data, world, setSelectedPlayerId, setPage }: { data: ViewMo
             <div className="team-tree">
               {teams.map((team) => (
                 <div key={team.id}>
+                  {(() => {
+                    const manager = [...world.managers.values()].find((item) => item.currentTeamId === team.id && item.status === "EMPLOYED");
+                    return manager ? <button className="row-button" onClick={() => setPage("MANAGER")}><span>감독 {localizeEntityName(manager.name)}</span><strong>{reputationLabel(manager.reputation)}</strong></button> : <span>감독 공석</span>;
+                  })()}
                   <strong>{teamName(world, team.id)}</strong>
                   <span>{team.rosterLevelName ?? "팀"} · {team.isTopLevel ? "1군" : "육성/퓨처스"}</span>
                   <CompactList empty="선수가 없습니다.">
@@ -462,7 +557,7 @@ function PlayersPage({
   world: LeagueWorld;
   query: string;
   setQuery: (value: string) => void;
-  selectedPlayer?: Player;
+  selectedPlayer: Player | undefined;
   setSelectedPlayerId: (id: EntityId) => void;
 }) {
   const filtered = data.players.filter((player) => {
@@ -496,7 +591,7 @@ function PlayersPage({
   );
 }
 
-function PlayerDetail({ player, world, data }: { player?: Player; world: LeagueWorld; data: ViewModel }) {
+function PlayerDetail({ player, world, data }: { player: Player | undefined; world: LeagueWorld; data: ViewModel }) {
   if (!player) return <Panel title="선수 상세"><EmptyState text="선수를 선택하세요." /></Panel>;
   const logs = world.getPlayerGameLogs(player.id);
   const scouting = [...world.scoutingReports.values()].filter((report) => report.playerId === player.id);
@@ -604,19 +699,24 @@ function MarketPage({
 }) {
   const fa = data.players.filter((player) => player.status === "FREE_AGENT");
   const firstFa = fa[0];
-  const seoulPlayer = data.players.find((player) => player.currentOrganizationId === "org_seoul" && player.primaryPosition !== "P");
-  const busanPlayer = data.players.find((player) => player.currentOrganizationId === "org_busan" && player.primaryPosition !== "P");
-  const postingPlayer = data.players.find((player) => player.currentOrganizationId === "org_seoul" && player.currentTeamId);
+  const userOrganizationId = data.userManager?.currentOrganizationId;
+  const opponentOrganizationId = data.organizations.find((organization) => organization.id !== userOrganizationId)?.id;
+  const userPlayer = data.players.find((player) => player.currentOrganizationId === userOrganizationId && player.primaryPosition !== "P");
+  const opponentPlayer = data.players.find((player) => player.currentOrganizationId === opponentOrganizationId && player.primaryPosition !== "P");
+  const postingPlayer = data.players.find((player) => player.currentOrganizationId === userOrganizationId && player.currentTeamId);
+  const postingLeagueId = postingPlayer?.currentTeamId ? world.teams.get(postingPlayer.currentTeamId)?.leagueId : undefined;
+  const hasClubPower = !!userOrganizationId;
   return (
     <section className="section-stack">
+      {!hasClubPower && <Panel title="구단 권한"><EmptyState text="무직 상태에서는 계약 제안, 트레이드, 포스팅 같은 구단 권한을 사용할 수 없습니다." /></Panel>}
       <div className="market-grid">
         <Panel title="FA">
           <CompactList empty="FA 선수가 없습니다.">
             {fa.map((player) => <span key={player.id}>{playerName(world, player.id)} · 요구액 {player.contractDemand ? formatMoney(player.contractDemand.desiredSalary, "USD") : "정보 없음"}</span>)}
           </CompactList>
           <div className="button-row">
-            <button disabled={!firstFa} onClick={() => firstFa && mutate("FA contract offer made.", () => world.makeContractOffer({ playerId: firstFa.id, organizationId: "org_seoul", salary: firstFa.contractDemand?.desiredSalary ?? 500000, currency: "USD", signingBonus: 50000, startDate: world.clock.now(), endDate: "2028-12-31", preferredRole: firstFa.primaryPosition }))}><Handshake size={16} />계약 제안</button>
-            <button disabled={!firstFa} onClick={() => firstFa && mutate("Best FA offer accepted.", () => world.acceptContractOffer(world.chooseBestContractOffer(firstFa.id).offerId))}><ClipboardCheck size={16} />최적 제안 수락</button>
+            <button disabled={!firstFa || !userOrganizationId} onClick={() => firstFa && userOrganizationId && mutate("FA contract offer made.", () => world.makeContractOffer({ playerId: firstFa.id, organizationId: userOrganizationId, salary: firstFa.contractDemand?.desiredSalary ?? 500000, currency: "USD", signingBonus: 50000, startDate: world.clock.now(), endDate: "2028-12-31", preferredRole: firstFa.primaryPosition }))}><Handshake size={16} />계약 제안</button>
+            <button disabled={!firstFa || !userOrganizationId} onClick={() => firstFa && mutate("Best FA offer accepted.", () => world.acceptContractOffer(world.chooseBestContractOffer(firstFa.id).offerId))}><ClipboardCheck size={16} />최적 제안 수락</button>
           </div>
         </Panel>
         <Panel title="계약 제안">
@@ -640,7 +740,7 @@ function MarketPage({
       <div className="market-grid">
         <Panel title="트레이드">
           <div className="button-row">
-            <button disabled={!seoulPlayer || !busanPlayer} onClick={() => seoulPlayer && busanPlayer && mutate("Trade proposed.", () => world.proposeTrade({ proposerOrganizationId: "org_seoul", targetOrganizationId: "org_busan", playersFromProposer: [seoulPlayer.id], playersFromTarget: [busanPlayer.id], cash: 250000 }))}><Handshake size={16} />트레이드 제안</button>
+            <button disabled={!userOrganizationId || !opponentOrganizationId || !userPlayer || !opponentPlayer} onClick={() => userOrganizationId && opponentOrganizationId && userPlayer && opponentPlayer && mutate("Trade proposed.", () => world.proposeTrade({ proposerOrganizationId: userOrganizationId, targetOrganizationId: opponentOrganizationId, playersFromProposer: [userPlayer.id], playersFromTarget: [opponentPlayer.id], cash: 250000 }))}><Handshake size={16} />트레이드 제안</button>
             <button disabled={world.tradeProposals.size === 0} onClick={() => mutate("Latest trade evaluated.", () => {
               const proposal = [...world.tradeProposals.values()].at(-1);
               if (!proposal) return;
@@ -654,7 +754,7 @@ function MarketPage({
         </Panel>
         <Panel title="포스팅">
           <div className="button-row">
-            <button disabled={!postingPlayer} onClick={() => postingPlayer && mutate("Posting requested.", () => world.requestPosting({ playerId: postingPlayer.id, currentOrganizationId: postingPlayer.currentOrganizationId!, sourceLeagueId: "league_kr1", targetLeagueIds: ["league_pw1"], compensationFee: 300000 }))}><FileJson size={16} />포스팅 요청</button>
+            <button disabled={!postingPlayer || !postingLeagueId || !userOrganizationId} onClick={() => postingPlayer && postingLeagueId && userOrganizationId && mutate("Posting requested.", () => world.requestPosting({ playerId: postingPlayer.id, currentOrganizationId: userOrganizationId, sourceLeagueId: postingLeagueId, targetLeagueIds: ["league_pw1"], compensationFee: 300000 }))}><FileJson size={16} />포스팅 요청</button>
             <button disabled={world.postingRequests.size === 0} onClick={() => mutate("Overseas posting offer made.", () => {
               const posting = [...world.postingRequests.values()].find((item) => item.status === "APPROVED");
               if (!posting) return;
@@ -667,9 +767,9 @@ function MarketPage({
         </Panel>
       </div>
       <Panel title="시장 가치">
-        <Table headers={["선수", "서울 관점 가치", "예상 CA", "예상 PA", "계약 부담"]}>
+        <Table headers={["선수", "구단 관점 가치", "예상 CA", "예상 PA", "계약 부담"]}>
           {data.players.slice(0, 12).map((player) => {
-            const value = world.calculatePlayerMarketValue(player.id, "org_seoul");
+            const value = world.calculatePlayerMarketValue(player.id, userOrganizationId);
             return <tr key={player.id}><td>{playerName(world, player.id)}</td><td>{value.value.toFixed(1)}</td><td>{value.estimatedCurrentAbility}</td><td>{value.estimatedPotentialAbility}</td><td>{value.contractBurden}</td></tr>;
           })}
         </Table>
@@ -758,7 +858,7 @@ interface ViewModel {
 function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
   const season = world.seasons.get(bundle.seasonId);
   const userManager = world.managers.get(bundle.userManagerId);
-  const userTeam = world.teams.get(bundle.userTeamId);
+  const userTeam = userManager ? (userManager.currentTeamId ? world.teams.get(userManager.currentTeamId) : undefined) : world.teams.get(bundle.userTeamId);
   const myFuturesTeam = [...world.teams.values()].find((team) => team.organizationId === userTeam?.organizationId && !team.isTopLevel);
   const players = [...world.players.values()].sort((a, b) => a.name.localeCompare(b.name));
   const standings = season ? world.getStandings(season.id) : [];
@@ -778,9 +878,9 @@ function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
     battingLeaders: season ? world.getBattingLeaders(season.id, "OPS", { limit: 5 }) : [],
     pitchingLeaders: season ? world.getPitchingLeaders(season.id, "ERA", { limit: 5 }) : [],
     events: [...world.events].reverse(),
-    prospects: world.getProspectRankings({ organizationId: "org_seoul", limit: 30 }).map((entry) => ({
+    prospects: world.getProspectRankings({ organizationId: userManager?.currentOrganizationId ?? "org_seoul", limit: 30 }).map((entry) => ({
       ...entry,
-      recommendationLabel: labelRecommendation(scoutingRecommendation(world, entry.playerId)),
+      recommendationLabel: labelRecommendation(scoutingRecommendation(world, entry.playerId, userManager?.currentOrganizationId ?? "org_seoul")),
     })),
     teamNames: Object.fromEntries([...world.teams.values()].map((team) => [team.id, localizeEntityName(team.name)])),
     playerStats: Object.fromEntries(players.map((player) => [player.id, statLine(world, player.id, bundle.seasonId)])),
@@ -933,9 +1033,46 @@ function subjectName(world: LeagueWorld, subjectId: EntityId) {
   return playerName(world, subjectId) || managerName(world, subjectId) || teamName(world, subjectId) || subjectId;
 }
 
+function managerContractLabel(world: LeagueWorld, managerId?: EntityId) {
+  if (!managerId) return "-";
+  const manager = world.managers.get(managerId);
+  const contract = manager?.contracts.find((item) => item.status === "ACTIVE");
+  if (!contract) return "-";
+  return `${orgName(world, contract.organizationId)} · ${formatMoney(contract.salary, contract.currency)}`;
+}
+
+function reputationLabel(value: number) {
+  if (value >= 90) return `세계적 (${value})`;
+  if (value >= 78) return `국제적 (${value})`;
+  if (value >= 66) return `국내 정상급 (${value})`;
+  if (value >= 52) return `국내 유망 (${value})`;
+  if (value >= 35) return `지역급 (${value})`;
+  return `무명 (${value})`;
+}
+
+function confidenceLabel(value: number | undefined) {
+  if (value === undefined) return "-";
+  if (value >= 82) return `매우 만족 (${value})`;
+  if (value >= 64) return `만족 (${value})`;
+  if (value >= 45) return `보통 (${value})`;
+  if (value >= 25) return `불안 (${value})`;
+  return `매우 불안 (${value})`;
+}
+
+function labelManagerRole(value: string) {
+  const labels: Record<string, string> = {
+    MANAGER: "감독",
+    FARM_MANAGER: "팜 감독",
+    AMATEUR_MANAGER: "아마추어 감독",
+    NATIONAL_TEAM_MANAGER: "국가대표 감독",
+  };
+  return labels[value] ?? value;
+}
+
 function countryLabel(code?: string) {
   if (code === "KR") return "대한민국";
   if (code === "PW") return "퍼시픽 웨스트";
+  if (code === "JP") return "일본";
   return code ?? "-";
 }
 
@@ -968,9 +1105,9 @@ function ratingLabel(key: string) {
   return labels[key] ?? key;
 }
 
-function scoutingRecommendation(world: LeagueWorld, playerId: EntityId) {
+function scoutingRecommendation(world: LeagueWorld, playerId: EntityId, organizationId: EntityId) {
   const report = [...world.scoutingReports.values()]
-    .filter((item) => item.playerId === playerId && item.organizationId === "org_seoul")
+    .filter((item) => item.playerId === playerId && item.organizationId === organizationId)
     .sort((a, b) => b.confidence - a.confidence)[0];
   return report?.recommendation ?? "WATCH";
 }

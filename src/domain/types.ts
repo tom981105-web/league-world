@@ -9,7 +9,24 @@ export type PlayerStatus =
   | "INDEPENDENT"
   | "RETIRED";
 
-export type ManagerStatus = "EMPLOYED" | "UNEMPLOYED" | "RETIRED";
+export type ManagerStatus = "EMPLOYED" | "UNEMPLOYED" | "SUSPENDED" | "RETIRED";
+
+export type ManagerRole =
+  | "MANAGER"
+  | "FARM_MANAGER"
+  | "AMATEUR_MANAGER"
+  | "NATIONAL_TEAM_MANAGER";
+
+export type ManagerJobVacancyStatus = "OPEN" | "FILLED" | "CLOSED";
+
+export type ManagerApplicationStatus =
+  | "APPLIED"
+  | "OFFERED"
+  | "REJECTED"
+  | "WITHDRAWN"
+  | "ACCEPTED";
+
+export type ManagerApplicationDecision = "OFFER" | "REJECT" | "HOLD";
 
 export type BattingSide = "L" | "R" | "S";
 
@@ -144,6 +161,12 @@ export type WorldEventType =
   | "MANAGER_HIRED"
   | "MANAGER_MOVED"
   | "MANAGER_FIRED"
+  | "MANAGER_CONTRACT_OFFERED"
+  | "MANAGER_CONTRACT_RENEWED"
+  | "MANAGER_RESIGNED"
+  | "MANAGER_SACKED"
+  | "MANAGER_BECAME_UNEMPLOYED"
+  | "MANAGER_MOVED_TEAM"
   | "MANAGER_RETIRED"
   | "REGULAR_SEASON_ENDED"
   | "POSTSEASON_STARTED"

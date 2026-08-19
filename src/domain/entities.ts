@@ -20,6 +20,10 @@ import type {
   ISODate,
   LeagueCategory,
   LiveGameStatus,
+  ManagerApplicationDecision,
+  ManagerApplicationStatus,
+  ManagerJobVacancyStatus,
+  ManagerRole,
   ManagerStatus,
   PersonType,
   PlateAppearanceResult,
@@ -374,11 +378,110 @@ export interface Manager {
   id: EntityId;
   name: string;
   birthDate: ISODate;
+  age: number;
+  nationality: string;
   nationalityCode: string;
+  employmentStatus: ManagerStatus;
   status: ManagerStatus;
   reputation: number;
+  currentOrganizationId?: EntityId;
   currentTeamId?: EntityId;
+  contracts: ManagerContract[];
+  careerStats: ManagerCareerStats;
+  boardConfidence?: BoardConfidence;
   careerEntries: CareerEntry[];
+}
+
+export interface ManagerContract {
+  id: EntityId;
+  managerId: EntityId;
+  organizationId: EntityId;
+  teamId?: EntityId;
+  role: ManagerRole;
+  startDate: ISODate;
+  endDate: ISODate;
+  salary: number;
+  currency: string;
+  status: ContractStatus;
+}
+
+export interface ManagerCareerStats {
+  games: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  winningPercentage: number;
+  championships: number;
+}
+
+export interface BoardConfidence {
+  managerId: EntityId;
+  organizationId: EntityId;
+  teamId?: EntityId;
+  score: number;
+  updatedOn: ISODate;
+  reason: string;
+}
+
+export interface ManagerJobVacancy {
+  id: EntityId;
+  organizationId: EntityId;
+  teamId: EntityId;
+  openedOn: ISODate;
+  status: ManagerJobVacancyStatus;
+  minimumReputation?: number;
+  preferredReputation?: number;
+  salaryRange: {
+    min: number;
+    max: number;
+    currency: string;
+  };
+  contractYearsRange: {
+    min: number;
+    max: number;
+  };
+  expectations: string;
+}
+
+export interface ManagerJobApplication {
+  id: EntityId;
+  vacancyId: EntityId;
+  managerId: EntityId;
+  organizationId: EntityId;
+  teamId: EntityId;
+  appliedOn: ISODate;
+  status: ManagerApplicationStatus;
+  desiredSalary?: number;
+  desiredYears?: number;
+  reason: string;
+}
+
+export interface ManagerContractOffer {
+  id: EntityId;
+  vacancyId?: EntityId;
+  managerId: EntityId;
+  organizationId: EntityId;
+  teamId?: EntityId;
+  role: ManagerRole;
+  salary: number;
+  currency: string;
+  years: number;
+  startDate: ISODate;
+  endDate: ISODate;
+  status: ContractOfferStatus;
+  offeredOn: ISODate;
+  expectations: string;
+  reason: string;
+}
+
+export interface ManagerApplicationEvaluation {
+  applicationId?: EntityId;
+  offerId?: EntityId;
+  managerId: EntityId;
+  organizationId: EntityId;
+  decision: ManagerApplicationDecision;
+  score: number;
+  reason: string;
 }
 
 export interface CareerEntry {
@@ -392,6 +495,13 @@ export interface CareerEntry {
   startDate: ISODate;
   endDate?: ISODate;
   reason: string;
+  games?: number;
+  wins?: number;
+  losses?: number;
+  draws?: number;
+  winningPercentage?: number;
+  championships?: number;
+  endReason?: string;
 }
 
 export interface WorldEvent {

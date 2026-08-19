@@ -56,6 +56,7 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
   const world = new LeagueWorld(new WorldClock("2027-04-03"), new Mulberry32Random(seed));
   world.addCountry({ id: "country_kr", code: "KR", name: "Korea Republic" });
   world.addCountry({ id: "country_pw", code: "PW", name: "Pacific West" });
+  world.addCountry({ id: "country_jp", code: "JP", name: "Japan Archipelago" });
   world.addLeague({
     id: "league_kr1",
     countryId: "country_kr",
@@ -85,6 +86,14 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
     name: "Pacific Global League",
     level: 1,
     category: "INTERNATIONAL",
+    usesDH: true,
+  });
+  world.addLeague({
+    id: "league_jp1",
+    countryId: "country_jp",
+    name: "Japan Frontier League",
+    level: 1,
+    category: "PROFESSIONAL",
     usesDH: true,
   });
 
@@ -122,6 +131,17 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
     rosterLevelName: "1군",
     isTopLevel: true,
   });
+  world.addOrganization({ id: "org_osaka", name: "Osaka Suns Organization", countryId: "country_jp" });
+  world.addTeam({
+    id: "team_osaka",
+    leagueId: "league_jp1",
+    organizationId: "org_osaka",
+    name: "Osaka Suns",
+    teamType: "CLUB",
+    rosterLevel: 1,
+    rosterLevelName: "1군",
+    isTopLevel: true,
+  });
 
   const season = world.createSeason({
     id: "season_2027",
@@ -152,10 +172,23 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
       id: `mgr_${org.id}`,
       name: `${org.city} Manager`,
       birthDate: "1979-02-10",
+      nationality: "대한민국",
       nationalityCode: "KR",
       status: "EMPLOYED",
       reputation: org.id === "org_seoul" ? 72 : 58,
       currentTeamId: teamIdFor(org.id, "top"),
+      contracts: [{
+        id: `mgr_contract_${org.id}_2027`,
+        managerId: `mgr_${org.id}`,
+        organizationId: org.id,
+        teamId: teamIdFor(org.id, "top"),
+        role: "MANAGER",
+        startDate: "2027-01-01",
+        endDate: org.id === "org_seoul" ? "2029-12-31" : "2028-12-31",
+        salary: org.id === "org_seoul" ? 900000 : 620000,
+        currency: "USD",
+        status: "ACTIVE",
+      }],
     });
     world.addScout({
       id: `scout_${org.id}`,
@@ -187,6 +220,41 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
     year: 2027,
     rounds: 3,
     draftOrder: ["org_daejeon", "org_incheon", "org_busan", "org_seoul"],
+  });
+
+  world.openManagerJobVacancy({
+    id: "vacancy_harbor_2027",
+    organizationId: "org_harbor",
+    teamId: "team_harbor",
+    minimumReputation: 45,
+    preferredReputation: 68,
+    salaryRange: { min: 550000, max: 1250000, currency: "USD" },
+    contractYearsRange: { min: 2, max: 4 },
+    expectations: "국제 리그 포스트시즌 경쟁",
+  });
+  world.openManagerJobVacancy({
+    id: "vacancy_osaka_2027",
+    organizationId: "org_osaka",
+    teamId: "team_osaka",
+    minimumReputation: 55,
+    preferredReputation: 72,
+    salaryRange: { min: 70000000, max: 190000000, currency: "JPY" },
+    contractYearsRange: { min: 2, max: 3 },
+    expectations: "젊은 선수 육성과 상위권 도약",
+  });
+  world.makeManagerOffer({
+    id: "manager_offer_osaka_2027",
+    vacancyId: "vacancy_osaka_2027",
+    managerId: "mgr_org_seoul",
+    organizationId: "org_osaka",
+    teamId: "team_osaka",
+    salary: 145000000,
+    currency: "JPY",
+    years: 3,
+    startDate: "2027-04-04",
+    endDate: "2029-12-31",
+    expectations: "3년 안에 우승권 진입",
+    reason: "해외 구단 감독 제안",
   });
 
   return {

@@ -50,6 +50,7 @@ const statusLabels: Record<string, string> = {
   RETIRED: "은퇴",
   EMPLOYED: "재직",
   UNEMPLOYED: "무직",
+  SUSPENDED: "직무 정지",
   PENDING: "대기",
   ACCEPTED: "수락",
   REJECTED: "거절",
@@ -63,6 +64,11 @@ const statusLabels: Record<string, string> = {
   APPROVED: "승인",
   FAILED: "실패",
   HOLD: "보류",
+  OFFER: "제안",
+  OFFERED: "제안됨",
+  APPLIED: "지원",
+  FILLED: "채용 완료",
+  CLOSED: "마감",
   COUNTER: "역제안",
   UNSELECTED: "미지명",
 };
@@ -84,6 +90,12 @@ const eventLabels: Record<string, string> = {
   MANAGER_HIRED: "감독 선임",
   MANAGER_MOVED: "감독 이적",
   MANAGER_FIRED: "감독 경질",
+  MANAGER_CONTRACT_OFFERED: "감독 계약 제안",
+  MANAGER_CONTRACT_RENEWED: "감독 재계약",
+  MANAGER_RESIGNED: "감독 사임",
+  MANAGER_SACKED: "감독 경질",
+  MANAGER_BECAME_UNEMPLOYED: "감독 무직 전환",
+  MANAGER_MOVED_TEAM: "감독 이직",
   MANAGER_RETIRED: "감독 은퇴",
   SEASON_STARTED: "시즌 개막",
   REGULAR_SEASON_ENDED: "정규시즌 종료",
@@ -201,6 +213,12 @@ export function localizeEngineMessage(message: string): string {
     "Moved a first-team player to Futures.": "1군 선수를 퓨처스로 이동했습니다.",
     "Rotated starting pitchers.": "선발 로테이션을 변경했습니다.",
     "Assigned bullpen role.": "불펜 역할을 지정했습니다.",
+    "Applied for manager job.": "감독직에 지원했습니다.",
+    "Manager offer created.": "감독 계약 제안이 생성되었습니다.",
+    "Manager offer accepted.": "감독 제안을 수락했습니다.",
+    "Manager offer rejected.": "감독 제안을 거절했습니다.",
+    "Manager resigned.": "감독직에서 사임했습니다.",
+    "Manager contract renewed.": "감독 재계약 제안을 만들었습니다.",
     "Auto lineups generated.": "자동 라인업을 생성했습니다.",
     "Game started.": "경기를 시작했습니다.",
     "Simulated next PA.": "다음 타석을 진행했습니다.",
@@ -233,9 +251,11 @@ export function localizeEntityName(name: string | undefined, fallback?: EntityId
   return name
     .replace("Korea Republic", "대한민국")
     .replace("Pacific West", "퍼시픽 웨스트")
+    .replace("Japan Archipelago", "일본 아키펠라고")
     .replace("Korea Premier League", "한국 프리미어 리그")
     .replace("Korea Futures League", "한국 퓨처스 리그")
     .replace("Pacific Global League", "퍼시픽 글로벌 리그")
+    .replace("Japan Frontier League", "일본 프런티어 리그")
     .replace("2027 Korea Premier League", "2027 한국 프리미어 리그")
     .replace("2027 Regular Season", "2027 정규시즌")
     .replace("Seoul Falcons Organization", "서울 팰컨스 조직")
@@ -243,6 +263,7 @@ export function localizeEntityName(name: string | undefined, fallback?: EntityId
     .replace("Incheon Waves Organization", "인천 웨이브스 조직")
     .replace("Daejeon Sparks Organization", "대전 스파크스 조직")
     .replace("Harbor Voyagers Organization", "하버 보이저스 조직")
+    .replace("Osaka Suns Organization", "오사카 선즈 조직")
     .replace("Seoul Falcons Futures", "서울 팰컨스 퓨처스")
     .replace("Busan Tides Futures", "부산 타이즈 퓨처스")
     .replace("Incheon Waves Futures", "인천 웨이브스 퓨처스")
@@ -252,6 +273,7 @@ export function localizeEntityName(name: string | undefined, fallback?: EntityId
     .replace("Incheon Waves", "인천 웨이브스")
     .replace("Daejeon Sparks", "대전 스파크스")
     .replace("Harbor Voyagers", "하버 보이저스")
+    .replace("Osaka Suns", "오사카 선즈")
     .replace("Seoul Manager", "서울 감독")
     .replace("Busan Manager", "부산 감독")
     .replace("Incheon Manager", "인천 감독")
