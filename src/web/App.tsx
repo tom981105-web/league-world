@@ -65,15 +65,18 @@ type Page =
   | "MANAGER"
   | "GAMES"
   | "STANDINGS"
+  | "ROSTER"
   | "TEAMS"
   | "PLAYERS"
   | "PROSPECTS"
+  | "SCOUTING"
   | "DRAFT"
   | "MARKET"
+  | "RECORDS"
   | "EVENTS"
   | "SAVES";
 
-const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "TEAMS", "PLAYERS", "PROSPECTS", "DRAFT", "MARKET", "EVENTS", "SAVES"];
+const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "ROSTER", "TEAMS", "PLAYERS", "PROSPECTS", "SCOUTING", "DRAFT", "MARKET", "RECORDS", "EVENTS", "SAVES"];
 const bullpenRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
 type ManagerTab = "OVERVIEW" | "ROSTER" | "CAREER" | "JOBS" | "OFFERS";
 const managerTabs: Record<ManagerTab, string> = {
@@ -292,14 +295,20 @@ export function App() {
 
       <main>
         <header className="topbar">
-          <div>
-            <span className="eyebrow">세계 날짜</span>
-            <h1>{formatDateKo(world.clock.now())}</h1>
+          <div className="topbar-title">
+            <strong>LEAGUE</strong>
+            <span>{formatDateKo(world.clock.now())}</span>
+          </div>
+          <div className="topbar-context">
+            <Metric label="시즌" value={localizeEntityName(data.season?.name) || "시즌 없음"} />
+            <Metric label="감독" value={localizeEntityName(data.userManager?.name) || "감독 없음"} />
+            <Metric label="구단" value={data.userManager?.currentOrganizationId ? orgName(world, data.userManager.currentOrganizationId) : "무직"} />
           </div>
           <div className="top-actions">
             <button onClick={() => advance(1)}><Clock3 size={16} />+1일</button>
             <button onClick={() => advance(7)}><CalendarDays size={16} />+7일</button>
             <button onClick={() => advance(30)}><ChevronsUpDown size={16} />+30일</button>
+            <button onClick={() => setPage("EVENTS")}><ListChecks size={16} />알림 {data.events.length}</button>
           </div>
         </header>
 
@@ -309,11 +318,14 @@ export function App() {
         {page === "MANAGER" && <ManagerPage data={data} world={world} mutate={mutate} tab={managerTab} setTab={setManagerTab} />}
         {page === "GAMES" && <GamesPage data={data} world={world} selectedGame={selectedGame} setSelectedGameId={setSelectedGameId} mutate={mutate} />}
         {page === "STANDINGS" && <StandingsPage data={data} />}
+        {page === "ROSTER" && <RosterPage data={data} world={world} setSelectedPlayerId={setSelectedPlayerId} setPage={setPage} />}
         {page === "TEAMS" && <TeamsPage data={data} world={world} setSelectedPlayerId={setSelectedPlayerId} setPage={setPage} />}
         {page === "PLAYERS" && <PlayersPage data={data} world={world} query={query} setQuery={setQuery} selectedPlayer={selectedPlayer} setSelectedPlayerId={setSelectedPlayerId} />}
         {page === "PROSPECTS" && <ProspectsPage data={data} world={world} setSelectedPlayerId={setSelectedPlayerId} setPage={setPage} />}
+        {page === "SCOUTING" && <ScoutingPage data={data} world={world} setSelectedPlayerId={setSelectedPlayerId} setPage={setPage} />}
         {page === "DRAFT" && <DraftPage bundle={bundle} data={data} world={world} mutate={mutate} />}
         {page === "MARKET" && <MarketPage data={data} world={world} mutate={mutate} offerEvaluations={offerEvaluations} onEvaluateOffer={evaluateOfferForUi} />}
+        {page === "RECORDS" && <RecordsPage data={data} world={world} />}
         {page === "EVENTS" && <EventsPage world={world} filter={eventFilter} setFilter={setEventFilter} />}
         {page === "SAVES" && <SavePage metas={saveMetas} onSave={saveSlot} onLoad={loadSaveSlot} onDelete={deleteSlot} onExport={exportSave} onImport={importSave} />}
       </main>
@@ -379,7 +391,7 @@ function StartScreen({
           <label className="form-field">국적<select value={careerNationality} onChange={(event) => setCareerNationality(event.target.value)}><option value="KR">대한민국</option><option value="JP">일본</option><option value="PW">퍼시픽 웨스트</option></select></label>
           <label className="form-field">시드<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
           <label className="form-field">시작 방식<select value={careerStartMode} onChange={(event) => setCareerStartMode(event.target.value as "CLUB" | "UNEMPLOYED")}><option value="CLUB">구단 선택</option><option value="UNEMPLOYED">무직</option></select></label>
-          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option></select></label>
+          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option><option value="org_suwon">수원 실즈</option><option value="org_gwangju">광주 선즈</option></select></label>
         </Panel>
         <Panel title="저장 슬롯">
           <SaveSlotList metas={saveMetas} onLoad={onLoadSlot} />
@@ -402,91 +414,136 @@ function HomePage({
   setSelectedGameId: (id: EntityId) => void;
   setSelectedPlayerId: (id: EntityId) => void;
 }) {
+  const teamStanding = data.standings.find((record) => record.teamId === data.userTeam?.id);
+  const recentGames = data.games
+    .filter((game) => game.status === "COMPLETED" && (game.homeTeamId === data.userTeam?.id || game.awayTeamId === data.userTeam?.id))
+    .slice(-5)
+    .reverse();
+  const nextGame = data.games.find((game) => game.status === "SCHEDULED" && (game.homeTeamId === data.userTeam?.id || game.awayTeamId === data.userTeam?.id));
+  const injuredPlayers = data.players.filter((player) => player.currentOrganizationId === data.userManager?.currentOrganizationId && player.injury.status !== "HEALTHY");
+  const expiringContracts = data.players
+    .filter((player) => player.currentOrganizationId === data.userManager?.currentOrganizationId)
+    .flatMap((player) => player.contracts.filter((contract) => contract.contractStatus === "ACTIVE" && contract.endDate <= "2027-12-31").map((contract) => ({ player, contract })))
+    .slice(0, 8);
+  const pendingOffers = [...world.managerContractOffers.values()].filter((offer) => offer.managerId === data.userManager?.id && offer.status === "PENDING");
+  const recentRosterEvents = data.events.filter((event) => event.type === "PLAYER_PROMOTED" || event.type === "PLAYER_DEMOTED").slice(0, 5);
+  const standingsLabel = teamStanding ? `${data.standings.findIndex((record) => record.teamId === teamStanding.teamId) + 1}위 · ${teamStanding.wins}승 ${teamStanding.losses}패 ${teamStanding.draws}무` : "순위 없음";
+
+  if (!data.userManager?.currentOrganizationId) {
+    return (
+      <section className="manager-home">
+        <div className="hero-band unemployed">
+          <span className="eyebrow">무직 감독 커리어</span>
+          <h1>{localizeEntityName(data.userManager?.name) || "새 감독"}</h1>
+          <p>현재 맡고 있는 구단이 없습니다. 구직 시장을 확인하고, 적합한 팀에 지원해 커리어를 시작하세요.</p>
+          <button onClick={() => setPage("MANAGER")}><Handshake size={16} />감독직 알아보기</button>
+        </div>
+        <section className="dashboard-grid">
+          <Panel title="채용 공고">
+            <CompactList empty="현재 공개된 감독직이 없습니다.">
+              {world.getManagerJobVacancies().map((job) => <span key={job.id}>{orgName(world, job.organizationId)} · {job.expectations}</span>)}
+            </CompactList>
+          </Panel>
+          <Panel title="감독에게 온 제안">
+            <CompactList empty="아직 받은 제안이 없습니다.">
+              {pendingOffers.map((offer) => <span key={offer.id}>{orgName(world, offer.organizationId)} · {formatMoney(offer.salary, offer.currency)} · {offer.years}년</span>)}
+            </CompactList>
+          </Panel>
+          <Panel title="최근 야구계 이벤트">
+            <CompactList empty="이벤트가 없습니다.">
+              {data.events.slice(0, 10).map((event) => <EventLine key={event.id} event={event} world={world} />)}
+            </CompactList>
+          </Panel>
+        </section>
+      </section>
+    );
+  }
+
   return (
-    <section className="dashboard-grid">
-      <Panel title="현재 시즌">
-        <Metric label="시즌" value={localizeEntityName(data.season?.name) || "시즌 없음"} />
-        <Metric label="상태" value={labelStatus(data.season?.status) || "비어 있음"} />
-        <Metric label="경기 수" value={data.games.length} />
-      </Panel>
-      <Panel title="오늘 경기">
-        <CompactList empty="오늘 예정된 경기가 없습니다.">
-          {data.todayGames.map((game) => (
-            <button className="row-button" key={game.id} onClick={() => { setSelectedGameId(game.id); setPage("GAMES"); }}>
-              <span>{teamName(world, game.awayTeamId)} @ {teamName(world, game.homeTeamId)}</span>
-              <strong>{gameScore(game)}</strong>
+    <section className="manager-home">
+      <div className="hero-band">
+        <div>
+          <span className="eyebrow">감독 대시보드</span>
+          <h1>{orgName(world, data.userManager.currentOrganizationId)} | 감독 {localizeEntityName(data.userManager.name)}</h1>
+          <p>{standingsLabel} · 구단 신뢰도 {confidenceLabel(data.userManager.boardConfidence?.score)} · {managerContractLabel(world, data.userManager.id)}</p>
+        </div>
+        <div className="hero-metrics">
+          <Metric label="1군 선수" value={data.myTopPlayers.length} />
+          <Metric label="퓨처스" value={data.myFuturesPlayers.length} />
+          <Metric label="부상" value={injuredPlayers.length} />
+          <Metric label="제안" value={pendingOffers.length} />
+        </div>
+      </div>
+      <section className="dashboard-grid">
+        <Panel title="다음 경기">
+          {nextGame ? (
+            <button className="feature-row" onClick={() => { setSelectedGameId(nextGame.id); setPage("GAMES"); }}>
+              <span>{formatDateKo(nextGame.scheduledDate)}</span>
+              <strong>{teamName(world, nextGame.awayTeamId)} @ {teamName(world, nextGame.homeTeamId)}</strong>
+              <em>{labelStatus(nextGame.status)}</em>
             </button>
-          ))}
-        </CompactList>
-      </Panel>
-      <Panel title="리그 상위권">
-        <Table headers={["순위", "팀", "승", "패", "승률"]}>
-          {data.standings.slice(0, 4).map((record, index) => (
-            <tr key={record.teamId}>
-              <td>{index + 1}</td>
-              <td>{teamName(world, record.teamId)}</td>
-              <td>{record.wins}</td>
-              <td>{record.losses}</td>
-              <td>{record.winningPercentage.toFixed(3)}</td>
-            </tr>
-          ))}
-        </Table>
-      </Panel>
-      <Panel title="타격 리더">
-        <CompactList empty="아직 타격 리더가 없습니다.">
-          {data.battingLeaders.map((entry) => (
-            <span key={entry.playerId}>{playerName(world, entry.playerId)} OPS {entry.value.toFixed(3)}</span>
-          ))}
-        </CompactList>
-      </Panel>
-      <Panel title="투수 리더">
-        <CompactList empty="아직 투수 리더가 없습니다.">
-          {data.pitchingLeaders.map((entry) => (
-            <span key={entry.playerId}>{playerName(world, entry.playerId)} ERA {entry.value.toFixed(2)}</span>
-          ))}
-        </CompactList>
-      </Panel>
-      <Panel title="최근 이벤트">
-        <CompactList empty="이벤트가 없습니다.">
-          {data.events.slice(0, 8).map((event) => <EventLine key={event.id} event={event} world={world} />)}
-        </CompactList>
-      </Panel>
-      <Panel title="최근 계약">
-        <CompactList empty="최근 계약이 없습니다.">
-          {data.events.filter((event) => event.type.includes("CONTRACT") || event.type === "PLAYER_SIGNED").slice(0, 5).map((event) => <EventLine key={event.id} event={event} world={world} />)}
-        </CompactList>
-      </Panel>
-      <Panel title="최근 트레이드">
-        <CompactList empty="최근 트레이드가 없습니다.">
-          {data.events.filter((event) => event.type.includes("TRADE") || event.type === "PLAYER_TRADED").slice(0, 5).map((event) => <EventLine key={event.id} event={event} world={world} />)}
-        </CompactList>
-      </Panel>
-      <Panel title="콜업 / 말소">
-        <CompactList empty="로스터 이동이 없습니다.">
-          {data.events.filter((event) => event.type === "PLAYER_PROMOTED" || event.type === "PLAYER_DEMOTED").slice(0, 5).map((event) => <EventLine key={event.id} event={event} world={world} />)}
-        </CompactList>
-      </Panel>
-      <Panel title="유망주 상위 10명">
-        <CompactList empty="유망주가 없습니다.">
-          {data.prospects.slice(0, 10).map((entry) => (
-            <button className="row-button" key={entry.playerId} onClick={() => { setSelectedPlayerId(entry.playerId); setPage("PLAYERS"); }}>
-              <span>{entry.rank}. {playerName(world, entry.playerId)}</span>
-              <strong>{entry.recommendationLabel}</strong>
-            </button>
-          ))}
-        </CompactList>
-      </Panel>
-      <Panel title="내 구단">
-        <Metric label="감독" value={localizeEntityName(data.userManager?.name) || "감독 없음"} />
-        <Metric label="소속" value={data.userManager?.currentOrganizationId ? orgName(world, data.userManager.currentOrganizationId) : "현재 소속 구단 없음"} />
-        <Metric label="팀" value={teamName(world, data.userTeam?.id) || "-"} />
-        <Metric label="계약" value={managerContractLabel(world, data.userManager?.id)} />
-        <Metric label="평판" value={reputationLabel(data.userManager?.reputation ?? 0)} />
-        <Metric label="구단 신뢰도" value={confidenceLabel(data.userManager?.boardConfidence?.score)} />
-        <Metric label="새 감독 제안" value={[...world.managerContractOffers.values()].filter((offer) => offer.managerId === data.userManager?.id && offer.status === "PENDING").length} />
-        <Metric label="1군 등록 선수" value={data.myTopPlayers.length} />
-        {!data.userManager?.currentOrganizationId && <button onClick={() => setPage("MANAGER")}>감독직 알아보기</button>}
-      </Panel>
+          ) : <EmptyState text="예정된 다음 경기가 없습니다." />}
+        </Panel>
+        <Panel title="최근 5경기">
+          <CompactList empty="완료된 팀 경기가 없습니다.">
+            {recentGames.map((game) => <button className="row-button" key={game.id} onClick={() => { setSelectedGameId(game.id); setPage("GAMES"); }}><span>{formatDateKo(game.scheduledDate)} · {teamName(world, game.awayTeamId)} @ {teamName(world, game.homeTeamId)}</span><strong>{gameScore(game)}</strong></button>)}
+          </CompactList>
+        </Panel>
+        <Panel title="현재 순위">
+          <Table headers={["순위", "팀", "경기", "승", "패", "무", "승률"]}>
+            {data.standings.slice(0, 6).map((record, index) => (
+              <tr key={record.teamId} className={record.teamId === data.userTeam?.id ? "selected-row" : ""}><td>{index + 1}</td><td>{teamName(world, record.teamId)}</td><td>{record.gamesPlayed}</td><td>{record.wins}</td><td>{record.losses}</td><td>{record.draws}</td><td>{record.winningPercentage.toFixed(3)}</td></tr>
+            ))}
+          </Table>
+        </Panel>
+        <Panel title="팀 주요 선수">
+          <CompactList empty="등록 선수가 없습니다.">
+            {data.myTopPlayers.slice(0, 8).map((player) => <button className="row-button" key={player.id} onClick={() => { setSelectedPlayerId(player.id); setPage("PLAYERS"); }}><span>{playerName(world, player.id)} · {player.primaryPosition}</span><strong>{data.playerStats[player.id] ?? "-"}</strong></button>)}
+          </CompactList>
+        </Panel>
+        <Panel title="부상 선수">
+          <CompactList empty="현재 부상 선수가 없습니다.">
+            {injuredPlayers.slice(0, 8).map((player) => <span key={player.id}>{playerName(world, player.id)} · {labelStatus(player.injury.status)} · 준비도 {player.gameCondition.readiness}</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="1군/2군 변동">
+          <CompactList empty="최근 로스터 변동이 없습니다.">
+            {recentRosterEvents.map((event) => <EventLine key={event.id} event={event} world={world} />)}
+          </CompactList>
+        </Panel>
+        <Panel title="계약 만료 예정">
+          <CompactList empty="이번 시즌 종료 예정 계약이 없습니다.">
+            {expiringContracts.map(({ player, contract }) => <span key={contract.id}>{playerName(world, player.id)} · {formatMoney(contract.salary, contract.currency)} · {formatDateKo(contract.endDate)}</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="FA / 트레이드 관심">
+          <CompactList empty="시장 움직임이 없습니다.">
+            {[...world.contractOffers.values()].slice(-4).map((offer) => <span key={offer.id}>FA 제안 · {playerName(world, offer.playerId)} · {orgName(world, offer.organizationId)}</span>)}
+            {[...world.tradeProposals.values()].slice(-4).map((trade) => <span key={trade.id}>트레이드 · {orgName(world, trade.proposerOrganizationId)} ↔ {orgName(world, trade.targetOrganizationId)} · {labelStatus(trade.status)}</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="유망주 TOP">
+          <CompactList empty="유망주가 없습니다.">
+            {data.prospects.slice(0, 10).map((entry) => <button className="row-button" key={entry.playerId} onClick={() => { setSelectedPlayerId(entry.playerId); setPage("PLAYERS"); }}><span>{entry.rank}. {playerName(world, entry.playerId)} · {entry.primaryPosition}</span><strong>{entry.recommendationLabel}</strong></button>)}
+          </CompactList>
+        </Panel>
+        <Panel title="감독에게 온 제안">
+          <CompactList empty="현재 받은 감독 제안이 없습니다.">
+            {pendingOffers.map((offer) => <span key={offer.id}>{orgName(world, offer.organizationId)} · {formatMoney(offer.salary, offer.currency)} · {offer.years}년</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="최근 야구계 이벤트">
+          <CompactList empty="이벤트가 없습니다.">
+            {data.events.slice(0, 9).map((event) => <EventLine key={event.id} event={event} world={world} />)}
+          </CompactList>
+        </Panel>
+        <Panel title="리그 리더">
+          <CompactList empty="리더 기록이 없습니다.">
+            {data.battingLeaders.slice(0, 4).map((entry) => <span key={entry.playerId}>타격 · {playerName(world, entry.playerId)} OPS {entry.value.toFixed(3)}</span>)}
+            {data.pitchingLeaders.slice(0, 4).map((entry) => <span key={entry.playerId}>투수 · {playerName(world, entry.playerId)} ERA {entry.value.toFixed(2)}</span>)}
+          </CompactList>
+        </Panel>
+      </section>
     </section>
   );
 }
@@ -711,6 +768,50 @@ function StandingsPage({ data }: { data: ViewModel }) {
   );
 }
 
+function RosterPage({ data, world, setSelectedPlayerId, setPage }: { data: ViewModel; world: LeagueWorld; setSelectedPlayerId: (id: EntityId) => void; setPage: (page: Page) => void }) {
+  const all = [...data.myTopPlayers, ...data.myFuturesPlayers].sort((a, b) => (a.currentTeamId ?? "").localeCompare(b.currentTeamId ?? "") || a.primaryPosition.localeCompare(b.primaryPosition) || b.currentAbility - a.currentAbility);
+  const rotation = data.userTeam ? world.pitchingRotations.get(data.userTeam.id) : undefined;
+  const bullpen = data.userTeam ? [...(world.bullpenAssignments.get(data.userTeam.id)?.values() ?? [])] : [];
+  return (
+    <section className="section-stack">
+      <div className="profile-strip">
+        <Metric label="1군" value={`${data.myTopPlayers.length}명`} />
+        <Metric label="퓨처스" value={`${data.myFuturesPlayers.length}명`} />
+        <Metric label="투수" value={`${all.filter((player) => player.primaryPosition === "P").length}명`} />
+        <Metric label="부상/재활" value={`${all.filter((player) => player.injury.status !== "HEALTHY").length}명`} />
+      </div>
+      <Panel title="선수단 현황">
+        <Table headers={["소속", "선수", "나이", "포지션", "상태", "로스터", "컨디션", "시즌 기록"]}>
+          {all.map((player) => (
+            <tr key={player.id} onClick={() => { setSelectedPlayerId(player.id); setPage("PLAYERS"); }}>
+              <td>{teamName(world, player.currentTeamId)}</td>
+              <td>{playerName(world, player.id)}</td>
+              <td>{player.age}</td>
+              <td>{player.primaryPosition}</td>
+              <td>{labelStatus(player.status)}</td>
+              <td>{labelStatus(player.rosterStatus)}</td>
+              <td>{player.gameCondition.readiness - player.gameCondition.fatigue}</td>
+              <td>{data.playerStats[player.id] ?? "-"}</td>
+            </tr>
+          ))}
+        </Table>
+      </Panel>
+      <div className="two-column">
+        <Panel title="선발 로테이션">
+          <CompactList empty="로테이션이 없습니다.">
+            {(rotation?.orderedStartingPitcherIds ?? []).map((id, index) => <span key={id}>{index + 1}. {playerName(world, id)}</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="불펜 역할">
+          <CompactList empty="불펜 역할이 없습니다.">
+            {bullpen.map((assignment) => <span key={assignment.playerId}>{playerName(world, assignment.playerId)} · {assignment.roles.map(labelBullpenRole).join(", ")}</span>)}
+          </CompactList>
+        </Panel>
+      </div>
+    </section>
+  );
+}
+
 function TeamsPage({ data, world, setSelectedPlayerId, setPage }: { data: ViewModel; world: LeagueWorld; setSelectedPlayerId: (id: EntityId) => void; setPage: (page: Page) => void }) {
   return (
     <section className="section-stack">
@@ -797,6 +898,7 @@ function PlayersPage({
 }
 
 function PlayerDetail({ player, world, data }: { player: Player | undefined; world: LeagueWorld; data: ViewModel }) {
+  const [tab, setTab] = useState<"SUMMARY" | "STATS" | "LOGS" | "CONTRACT" | "CAREER" | "SCOUTING">("SUMMARY");
   if (!player) return <Panel title="선수 상세"><EmptyState text="선수를 선택하세요." /></Panel>;
   const logs = world.getPlayerGameLogs(player.id);
   const scouting = [...world.scoutingReports.values()].filter((report) => report.playerId === player.id);
@@ -808,32 +910,39 @@ function PlayerDetail({ player, world, data }: { player: Player | undefined; wor
         <Metric label="포지션" value={`${player.primaryPosition} / ${player.secondaryPositions.join(", ") || "-"}`} />
         <Metric label="팀" value={teamName(world, player.currentTeamId) || "-"} />
       </div>
-      <h3>공개 야구 능력치</h3>
-      <div className="ratings-grid">
-        {Object.entries(player.battingRatings).map(([key, value]) => <Metric key={key} label={`타격 ${ratingLabel(key)}`} value={String(value)} />)}
-        {Object.entries(player.pitchingRatings).filter(([key]) => key !== "repertoire").map(([key, value]) => <Metric key={key} label={`투구 ${ratingLabel(key)}`} value={String(value)} />)}
+      <div className="tab-row">
+        {[
+          ["SUMMARY", "개요"],
+          ["STATS", "기록"],
+          ["LOGS", "경기로그"],
+          ["CONTRACT", "계약"],
+          ["CAREER", "커리어"],
+          ["SCOUTING", "스카우팅"],
+        ].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key as typeof tab)}>{label}</button>)}
       </div>
-      <h3>컨디션 / 계약</h3>
-      <HistoryList title="" items={[
-        `부상: ${labelStatus(player.injury.status)}`,
-        `피로도: ${player.gameCondition.fatigue}, 준비도: ${player.gameCondition.readiness}`,
-        ...player.contracts.map((contract) => `${orgName(world, contract.organizationId)} ${formatMoney(contract.salary, contract.currency)} ${formatDateKo(contract.startDate)}-${formatDateKo(contract.endDate)} ${labelStatus(contract.contractStatus)}`),
-      ]} />
-      <h3>시즌 기록 / 경기별 기록</h3>
-      <HistoryList title="" items={[
-        data.playerStats[player.id] ?? "시즌 기록 없음",
-        ...logs.batting.slice(-5).map((log) => `${formatDateKo(log.date)} 상대 ${teamName(world, log.opponentTeamId)} ${log.hits}/${log.atBats}, HR ${log.homeRuns}, RBI ${log.runsBattedIn}`),
-        ...logs.pitching.slice(-5).map((log) => `${formatDateKo(log.date)} 상대 ${teamName(world, log.opponentTeamId)} IP ${log.inningsPitched}, ER ${log.earnedRuns}, SO ${log.strikeouts}`),
-      ]} />
-      <h3>커리어 / 로스터 이력</h3>
-      <HistoryList title="" items={[
+      {tab === "SUMMARY" && (
+        <>
+          <h3>공개 야구 능력치</h3>
+          <div className="ratings-grid">
+            {Object.entries(player.battingRatings).map(([key, value]) => <Metric key={key} label={`타격 ${ratingLabel(key)}`} value={String(value)} />)}
+            {Object.entries(player.pitchingRatings).filter(([key]) => key !== "repertoire").map(([key, value]) => <Metric key={key} label={`투구 ${ratingLabel(key)}`} value={String(value)} />)}
+          </div>
+          <HistoryList title="컨디션" items={[`부상: ${labelStatus(player.injury.status)}`, `피로도: ${player.gameCondition.fatigue}`, `준비도: ${player.gameCondition.readiness}`, `출전 가능: ${player.gameCondition.availableForGame ? "가능" : "제한"}`]} />
+        </>
+      )}
+      {tab === "STATS" && <HistoryList title="시즌 기록" items={[data.playerStats[player.id] ?? "시즌 기록 없음"]} />}
+      {tab === "LOGS" && <HistoryList title="경기별 기록" items={[
+        ...logs.batting.slice(-10).map((log) => `${formatDateKo(log.date)} 상대 ${teamName(world, log.opponentTeamId)} ${log.hits}/${log.atBats}, HR ${log.homeRuns}, RBI ${log.runsBattedIn}`),
+        ...logs.pitching.slice(-10).map((log) => `${formatDateKo(log.date)} 상대 ${teamName(world, log.opponentTeamId)} IP ${log.inningsPitched}, ER ${log.earnedRuns}, SO ${log.strikeouts}`),
+      ]} />}
+      {tab === "CONTRACT" && <HistoryList title="계약" items={player.contracts.map((contract) => `${orgName(world, contract.organizationId)} ${formatMoney(contract.salary, contract.currency)} ${formatDateKo(contract.startDate)}-${formatDateKo(contract.endDate)} ${labelStatus(contract.contractStatus)}`)} />}
+      {tab === "CAREER" && <HistoryList title="커리어 / 로스터 이력" items={[
         ...player.careerEntries.map((entry) => `${formatDateKo(entry.startDate)}-${entry.endDate ? formatDateKo(entry.endDate) : "현재"} ${localizeEntityName(entry.organizationNameSnapshot)} ${labelStatus(entry.status)} · ${entry.reason}`),
         ...player.rosterAssignments.map((entry) => `${formatDateKo(entry.startDate)}-${entry.endDate ? formatDateKo(entry.endDate) : "현재"} ${teamName(world, entry.teamId)} ${labelStatus(entry.rosterStatus)}`),
-      ]} />
-      <h3>스카우팅 리포트</h3>
-      <Table headers={["조직", "예상 CA", "예상 PA", "확신도", "추천"]}>
+      ]} />}
+      {tab === "SCOUTING" && <Table headers={["조직", "예상 CA", "예상 PA", "확신도", "추천"]}>
         {scouting.map((report) => <tr key={report.id}><td>{orgName(world, report.organizationId)}</td><td>{report.estimatedCA}</td><td>{report.estimatedPARange.low}-{report.estimatedPARange.high}</td><td>{report.confidence}</td><td>{labelRecommendation(report.recommendation)}</td></tr>)}
-      </Table>
+      </Table>}
     </Panel>
   );
 }
@@ -863,6 +972,42 @@ function ProspectsPage({ data, world, setSelectedPlayerId, setPage }: { data: Vi
   );
 }
 
+function ScoutingPage({ data, world, setSelectedPlayerId, setPage }: { data: ViewModel; world: LeagueWorld; setSelectedPlayerId: (id: EntityId) => void; setPage: (page: Page) => void }) {
+  const organizationId = data.userManager?.currentOrganizationId ?? "org_seoul";
+  const reports = [...world.scoutingReports.values()]
+    .filter((report) => report.organizationId === organizationId)
+    .sort((a, b) => b.confidence - a.confidence || b.estimatedPARange.high - a.estimatedPARange.high)
+    .slice(0, 80);
+  return (
+    <section className="section-stack">
+      <Panel title="스카우트 조직">
+        <Table headers={["스카우터", "소속", "현재 평가", "잠재력 평가", "지역 지식", "경험"]}>
+          {[...world.scouts.values()].filter((scout) => scout.organizationId === organizationId).map((scout) => <tr key={scout.id}><td>{localizeEntityName(scout.name)}</td><td>{orgName(world, scout.organizationId)}</td><td>{scout.abilityEvaluation}</td><td>{scout.potentialEvaluation}</td><td>{scout.regionalKnowledge}</td><td>{scout.experience}</td></tr>)}
+        </Table>
+      </Panel>
+      <Panel title="스카우팅 리포트">
+        <Table headers={["선수", "나이", "포지션", "예상 CA", "예상 PA", "확신도", "종합 등급", "추천"]}>
+          {reports.map((report) => {
+            const player = world.players.get(report.playerId);
+            return (
+              <tr key={report.id} onClick={() => { setSelectedPlayerId(report.playerId); setPage("PLAYERS"); }}>
+                <td>{playerName(world, report.playerId)}</td>
+                <td>{player?.age ?? "-"}</td>
+                <td>{player?.primaryPosition ?? "-"}</td>
+                <td>{report.estimatedCA}</td>
+                <td>{report.estimatedPARange.low}-{report.estimatedPARange.high}</td>
+                <td>{report.confidence}</td>
+                <td>{report.overallGrade}</td>
+                <td>{labelRecommendation(report.recommendation)}</td>
+              </tr>
+            );
+          })}
+        </Table>
+      </Panel>
+    </section>
+  );
+}
+
 function DraftPage({ bundle, data, world, mutate }: { bundle: SeedWorldResult; data: ViewModel; world: LeagueWorld; mutate: (label: string, action: () => void) => void }) {
   const draft = world.drafts.get(bundle.draftId);
   const nextPick = draft?.picks.find((pick) => !pick.playerId);
@@ -886,6 +1031,34 @@ function DraftPage({ bundle, data, world, mutate }: { bundle: SeedWorldResult; d
         </CompactList>
       </Panel>
     </section>
+  );
+}
+
+function RecordsPage({ data, world }: { data: ViewModel; world: LeagueWorld }) {
+  const battingAverage = data.season ? world.getBattingLeaders(data.season.id, "AVG", { limit: 15, qualifiedOnly: false }) : [];
+  const homeRuns = data.season ? world.getBattingLeaders(data.season.id, "HR", { limit: 15, qualifiedOnly: false }) : [];
+  const strikeouts = data.season ? world.getPitchingLeaders(data.season.id, "SO", { limit: 15, qualifiedOnly: false }) : [];
+  const era = data.season ? world.getPitchingLeaders(data.season.id, "ERA", { limit: 15, qualifiedOnly: false }) : [];
+  return (
+    <section className="records-grid">
+      <LeaderTable title="타율 순위" leaders={battingAverage} world={world} valueFormat={(value) => value.toFixed(3)} />
+      <LeaderTable title="홈런 순위" leaders={homeRuns} world={world} valueFormat={(value) => String(value)} />
+      <LeaderTable title="ERA 순위" leaders={era} world={world} valueFormat={(value) => value.toFixed(2)} />
+      <LeaderTable title="탈삼진 순위" leaders={strikeouts} world={world} valueFormat={(value) => String(value)} />
+    </section>
+  );
+}
+
+function LeaderTable({ title, leaders, world, valueFormat }: { title: string; leaders: Array<{ playerId: EntityId; value: number }>; world: LeagueWorld; valueFormat: (value: number) => string }) {
+  return (
+    <Panel title={title}>
+      <Table headers={["순위", "선수", "팀", "기록"]}>
+        {leaders.map((entry, index) => {
+          const player = world.players.get(entry.playerId);
+          return <tr key={`${title}-${entry.playerId}`}><td>{index + 1}</td><td>{playerName(world, entry.playerId)}</td><td>{teamName(world, player?.currentTeamId)}</td><td>{valueFormat(entry.value)}</td></tr>;
+        })}
+      </Table>
+    </Panel>
   );
 }
 
@@ -1227,11 +1400,14 @@ function navIcon(page: Page) {
   if (page === "MANAGER") return <UserRound size={size} />;
   if (page === "GAMES") return <CalendarDays size={size} />;
   if (page === "STANDINGS") return <BarChart3 size={size} />;
+  if (page === "ROSTER") return <UsersRound size={size} />;
   if (page === "TEAMS") return <Shield size={size} />;
   if (page === "PLAYERS") return <UsersRound size={size} />;
   if (page === "PROSPECTS") return <Sparkles size={size} />;
+  if (page === "SCOUTING") return <Search size={size} />;
   if (page === "DRAFT") return <ClipboardCheck size={size} />;
   if (page === "MARKET") return <Handshake size={size} />;
+  if (page === "RECORDS") return <BarChart3 size={size} />;
   if (page === "SAVES") return <FileJson size={size} />;
   return <ListChecks size={size} />;
 }

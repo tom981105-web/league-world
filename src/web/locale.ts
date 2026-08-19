@@ -5,11 +5,14 @@ export type PageKey =
   | "MANAGER"
   | "GAMES"
   | "STANDINGS"
+  | "ROSTER"
   | "TEAMS"
   | "PLAYERS"
   | "PROSPECTS"
+  | "SCOUTING"
   | "DRAFT"
   | "MARKET"
+  | "RECORDS"
   | "EVENTS"
   | "SAVES";
 
@@ -18,11 +21,14 @@ export const pageLabels: Record<PageKey, string> = {
   MANAGER: "감독",
   GAMES: "경기",
   STANDINGS: "순위",
+  ROSTER: "선수단",
   TEAMS: "구단",
   PLAYERS: "선수",
   PROSPECTS: "유망주",
+  SCOUTING: "스카우팅",
   DRAFT: "드래프트",
   MARKET: "이적시장",
+  RECORDS: "기록",
   EVENTS: "이벤트",
   SAVES: "저장",
 };
@@ -264,26 +270,36 @@ export function localizeEntityName(name: string | undefined, fallback?: EntityId
     .replace("Busan Tides Organization", "부산 타이즈 조직")
     .replace("Incheon Waves Organization", "인천 웨이브스 조직")
     .replace("Daejeon Sparks Organization", "대전 스파크스 조직")
+    .replace("Suwon Shields Organization", "수원 실즈 조직")
+    .replace("Gwangju Suns Organization", "광주 선즈 조직")
     .replace("Harbor Voyagers Organization", "하버 보이저스 조직")
     .replace("Osaka Suns Organization", "오사카 선즈 조직")
     .replace("Seoul Falcons Futures", "서울 팰컨스 퓨처스")
     .replace("Busan Tides Futures", "부산 타이즈 퓨처스")
     .replace("Incheon Waves Futures", "인천 웨이브스 퓨처스")
     .replace("Daejeon Sparks Futures", "대전 스파크스 퓨처스")
+    .replace("Suwon Shields Futures", "수원 실즈 퓨처스")
+    .replace("Gwangju Suns Futures", "광주 선즈 퓨처스")
     .replace("Seoul Falcons", "서울 팰컨스")
     .replace("Busan Tides", "부산 타이즈")
     .replace("Incheon Waves", "인천 웨이브스")
     .replace("Daejeon Sparks", "대전 스파크스")
+    .replace("Suwon Shields", "수원 실즈")
+    .replace("Gwangju Suns", "광주 선즈")
     .replace("Harbor Voyagers", "하버 보이저스")
     .replace("Osaka Suns", "오사카 선즈")
     .replace("Seoul Manager", "서울 감독")
     .replace("Busan Manager", "부산 감독")
     .replace("Incheon Manager", "인천 감독")
     .replace("Daejeon Manager", "대전 감독")
+    .replace("Suwon Manager", "수원 감독")
+    .replace("Gwangju Manager", "광주 감독")
     .replace("Seoul Area Scout", "서울 지역 스카우터")
     .replace("Busan Area Scout", "부산 지역 스카우터")
     .replace("Incheon Area Scout", "인천 지역 스카우터")
     .replace("Daejeon Area Scout", "대전 지역 스카우터")
+    .replace("Suwon Area Scout", "수원 지역 스카우터")
+    .replace("Gwangju Area Scout", "광주 지역 스카우터")
     .replace("Prospect", "유망주")
     .replace("Free Agent", "FA 선수");
 }

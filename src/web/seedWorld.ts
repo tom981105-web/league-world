@@ -29,11 +29,17 @@ export interface SeedWorldOptions {
 const firstLevelPositions: BaseballPosition[] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
 const pitcherRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "FLEXIBLE"];
 
-const organizations = [
+export const seedOrganizations = [
   { id: "org_seoul", name: "Seoul Falcons", city: "Seoul" },
   { id: "org_busan", name: "Busan Tides", city: "Busan" },
   { id: "org_incheon", name: "Incheon Waves", city: "Incheon" },
   { id: "org_daejeon", name: "Daejeon Sparks", city: "Daejeon" },
+] as const;
+
+const organizations = [
+  ...seedOrganizations,
+  { id: "org_suwon", name: "Suwon Shields", city: "Suwon" },
+  { id: "org_gwangju", name: "Gwangju Suns", city: "Gwangju" },
 ] as const;
 
 const names = [
@@ -57,6 +63,85 @@ const names = [
   "하은호",
   "차로한",
   "손예준",
+  "김도윤",
+  "이서준",
+  "박하준",
+  "정민재",
+  "최강준",
+  "오준서",
+  "윤시후",
+  "임태오",
+  "문지호",
+  "권우진",
+  "홍유찬",
+  "배건",
+  "조하람",
+  "노시온",
+  "민준영",
+  "서지안",
+  "강라온",
+  "유하민",
+  "신이든",
+  "양도겸",
+  "백이현",
+  "전해솔",
+  "심건",
+  "차민율",
+  "고태겸",
+  "남윤재",
+  "류은재",
+  "안시우",
+  "주도현",
+  "하태윤",
+  "손다온",
+  "송재하",
+  "황이안",
+  "장유준",
+  "구연우",
+  "나온유",
+  "마준",
+  "방시윤",
+  "설지후",
+  "원라율",
+  "도현준",
+  "표유성",
+  "천지율",
+  "진하겸",
+  "허준휘",
+  "기서율",
+  "라건우",
+  "봉태린",
+  "여민성",
+  "추이준",
+  "탁선재",
+  "편이솔",
+  "도하진",
+  "곽윤호",
+  "문서율",
+  "연도진",
+  "차은결",
+  "한로운",
+  "서태건",
+  "김리우",
+  "이찬결",
+  "박도겸",
+  "정유건",
+  "최시안",
+  "오하율",
+  "윤재윤",
+  "임서호",
+  "문건율",
+  "권이준",
+  "홍준휘",
+  "배시온",
+  "조민율",
+  "노라온",
+  "민유준",
+  "서은호",
+  "강태서",
+  "유지완",
+  "신도하",
+  "양이준",
 ];
 
 export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
@@ -227,7 +312,7 @@ export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {})
     seasonId: season.id,
     year: 2027,
     rounds: 3,
-    draftOrder: ["org_daejeon", "org_incheon", "org_busan", "org_seoul"],
+    draftOrder: ["org_gwangju", "org_daejeon", "org_suwon", "org_incheon", "org_busan", "org_seoul"],
   });
 
   world.openManagerJobVacancy({
@@ -303,33 +388,35 @@ function seedOrganization(world: LeagueWorld, seed: number, organizationId: Enti
   const futuresTeamId = teamIdFor(organizationId, "futures");
   const topPlayers: EntityId[] = [];
   const futuresPlayers: EntityId[] = [];
-  firstLevelPositions.forEach((position, index) => {
+  const hitterPositions: BaseballPosition[] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "C", "IF" as BaseballPosition, "OF" as BaseballPosition, "1B", "SS"];
+  hitterPositions.forEach((position, index) => {
     const id = `${organizationId}_bat_${index + 1}`;
-    world.addPlayer(makePlayer(id, names[(index + seed) % names.length] ?? id, position, {
-      currentAbility: 47 + index * 2,
-      potentialAbility: 58 + index * 2,
-      birthDate: `200${index % 6}-05-1${index % 9}` as ISODate,
+    const primaryPosition = position === ("IF" as BaseballPosition) ? firstLevelPositions[(index + 1) % 5]! : position === ("OF" as BaseballPosition) ? firstLevelPositions[5 + (index % 3)]! : position;
+    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + seed), primaryPosition, {
+      currentAbility: 42 + (index % 9) * 3,
+      potentialAbility: 55 + (index % 10) * 3,
+      birthDate: `${1997 + (index % 10)}-05-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
     }));
-    signAndAssign(world, id, organizationId, topTeamId, 520000 + index * 35000);
+    signAndAssign(world, id, organizationId, topTeamId, 360000 + index * 45000);
     topPlayers.push(id);
   });
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 12; index += 1) {
     const id = `${organizationId}_pit_${index + 1}`;
-    world.addPlayer(makePlayer(id, names[(index + 7 + seed) % names.length] ?? id, "P", {
-      currentAbility: 50 + index * 3,
-      potentialAbility: 63 + index * 2,
-      birthDate: `199${8 + (index % 2)}-03-1${index}` as ISODate,
+    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + 31 + seed), "P", {
+      currentAbility: 41 + (index % 8) * 4,
+      potentialAbility: 56 + (index % 9) * 3,
+      birthDate: `${1994 + (index % 11)}-03-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
     }));
-    signAndAssign(world, id, organizationId, topTeamId, 680000 + index * 55000);
+    signAndAssign(world, id, organizationId, topTeamId, 420000 + index * 52000);
     topPlayers.push(id);
   }
-  for (let index = 0; index < 7; index += 1) {
-    const position = index < 2 ? "P" : firstLevelPositions[(index + 2) % firstLevelPositions.length]!;
+  for (let index = 0; index < 20; index += 1) {
+    const position = index < 8 ? "P" : firstLevelPositions[(index + 2) % firstLevelPositions.length]!;
     const id = `${organizationId}_fut_${index + 1}`;
-    world.addPlayer(makePlayer(id, names[(index + 12 + seed) % names.length] ?? id, position, {
-      currentAbility: 34 + index,
-      potentialAbility: 60 + index * 2,
-      birthDate: `200${5 + (index % 4)}-07-0${(index % 8) + 1}` as ISODate,
+    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + 59 + seed), position, {
+      currentAbility: 30 + (index % 10) * 2,
+      potentialAbility: 52 + (index % 12) * 3,
+      birthDate: `${2003 + (index % 7)}-07-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
     }));
     signAndAssign(world, id, organizationId, futuresTeamId, 180000 + index * 12000);
     futuresPlayers.push(id);
@@ -342,10 +429,10 @@ function seedOrganization(world: LeagueWorld, seed: number, organizationId: Enti
 }
 
 function seedProspects(world: LeagueWorld): void {
-  for (let index = 0; index < 18; index += 1) {
+  for (let index = 0; index < 72; index += 1) {
     const position = index % 5 === 0 ? "P" : firstLevelPositions[index % firstLevelPositions.length]!;
     const id = `prospect_${index + 1}`;
-    world.addPlayer(makePlayer(id, `유망주 ${index + 1}`, position, {
+    world.addPlayer(makePlayer(id, uniqueName("prospect", index + 101), position, {
       status: index % 4 === 0 ? "STUDENT" : "AMATEUR",
       currentAbility: 28 + (index % 8) * 3,
       potentialAbility: 58 + (index % 7) * 5,
@@ -373,13 +460,13 @@ function seedProspects(world: LeagueWorld): void {
 }
 
 function seedFreeAgents(world: LeagueWorld): void {
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 18; index += 1) {
     const id = `free_agent_${index + 1}`;
-    world.addPlayer(makePlayer(id, `FA 선수 ${index + 1}`, index === 0 ? "P" : firstLevelPositions[index]!, {
+    world.addPlayer(makePlayer(id, uniqueName("free_agent", index + 211), index % 4 === 0 ? "P" : firstLevelPositions[index % firstLevelPositions.length]!, {
       status: "FREE_AGENT",
-      currentAbility: 42 + index * 5,
-      potentialAbility: 49 + index * 5,
-      birthDate: `${1996 + index}-01-1${index}` as ISODate,
+      currentAbility: 38 + (index % 9) * 4,
+      potentialAbility: 46 + (index % 10) * 4,
+      birthDate: `${1992 + (index % 12)}-01-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
       freeAgentStatus: {
         eligible: true,
         becameFreeAgentOn: "2027-03-20",
@@ -396,6 +483,14 @@ function seedFreeAgents(world: LeagueWorld): void {
       },
     }));
   }
+}
+
+function uniqueName(scope: EntityId, index: number): string {
+  const scopeOffset = [...scope].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const resolvedIndex = Math.abs(index + scopeOffset);
+  const base = names[resolvedIndex % names.length] ?? `선수 ${index}`;
+  const number = Math.floor(resolvedIndex / names.length) + 1;
+  return `${base}${number > 1 ? ` ${number}` : ""}`;
 }
 
 function makePlayer(
