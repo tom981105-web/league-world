@@ -7,12 +7,14 @@ import type {
   BattingLeaderboardEntry,
   Competition,
   Country,
+  GameActionHistoryEntry,
   GameDayRoster,
   GameFixture,
   GameRosterRules,
   GameResult,
   League,
   LiveGame,
+  ManagerGameStrategy,
   Manager,
   Organization,
   PlayerBattingGameLog,
@@ -41,6 +43,7 @@ import type {
   BaseballPosition,
   BattingLeaderCategory,
   BullpenRole,
+  GameActionType,
   GameHalf,
   GameStatus,
   InjurySeverity,
@@ -720,6 +723,16 @@ export class LeagueWorld {
       status: "IN_PROGRESS",
       boxScore: this.createEmptyBoxScore(game),
       playByPlay: [],
+      actionHistory: [],
+      removedPlayerIds: [],
+      currentDefense: {
+        [game.homeTeamId]: this.sortedLineup(homeRoster),
+        [game.awayTeamId]: this.sortedLineup(awayRoster),
+      },
+      strategies: {
+        [game.homeTeamId]: this.defaultManagerGameStrategy(),
+        [game.awayTeamId]: this.defaultManagerGameStrategy(),
+      },
     };
     this.liveGames.set(gameId, liveGame);
     this.record("GAME_STARTED", {
@@ -761,6 +774,7 @@ export class LeagueWorld {
     if (liveGame.status !== "IN_PROGRESS") {
       throw new Error(`Game is not in progress: ${gameId}`);
     }
+    this.runManagerAi(gameId, this.defenseTeamId(this.requireGame(gameId), liveGame.half));
     const result = this.simulatePlateAppearance(liveGame.currentBatterId, liveGame.currentPitcherId);
     return this.applyPlateAppearanceResult(gameId, result);
   }
@@ -800,6 +814,7 @@ export class LeagueWorld {
       rbiCredit,
       outsAdded,
     );
+    this.applyGameFatigue(batterId, pitcherId, result);
     this.advanceLineupIndex(liveGame, game);
 
     const event: PlayByPlayEvent = {
@@ -825,6 +840,214 @@ export class LeagueWorld {
     }
     this.assertInvariants();
     return structuredClone(event);
+  }
+
+  replacePitcher(
+    gameId: EntityId,
+    teamId: EntityId,
+    pitcherInId: EntityId,
+    options: { managerId?: EntityId; reason?: string; ai?: boolean } = {},
+  ): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const game = this.requireGame(gameId);
+    if (liveGame.status !== "IN_PROGRESS") throw new Error(`Game is not in progress: ${gameId}`);
+    if (teamId !== this.defenseTeamId(game, liveGame.half)) {
+      throw new Error(`Pitching change team must be on defense: ${teamId}`);
+    }
+    const roster = this.requireGameRoster(gameId, teamId);
+    const pitcherOutId = liveGame.currentPitcherId;
+    this.assertSubstitutionPlayerAvailable(liveGame, roster, pitcherInId, "bullpen");
+    if (!roster.bullpenPlayerIds.includes(pitcherInId)) {
+      throw new Error(`Pitcher ${pitcherInId} is not in the bullpen`);
+    }
+    liveGame.currentPitcherId = pitcherInId;
+    roster.startingPitcherId = pitcherInId;
+    this.removePlayerFromGameReserveLists(roster, pitcherInId);
+    this.updateDefensivePosition(liveGame, teamId, pitcherOutId, pitcherInId, "P");
+    this.markPlayerRemoved(liveGame, pitcherOutId);
+    this.ensurePitcherGameLine(liveGame.boxScore, pitcherInId, teamId);
+    const action = this.recordGameAction(liveGame, {
+      type: "PITCHING_CHANGE",
+      teamId,
+      ...(options.managerId ? { managerId: options.managerId } : {}),
+      playerOutId: pitcherOutId,
+      playerInId: pitcherInId,
+      description: options.reason ?? "투수 교체",
+      metadata: { ai: options.ai ?? false },
+    });
+    this.assertInvariants();
+    return structuredClone(action);
+  }
+
+  warmUpPitcher(gameId: EntityId, teamId: EntityId, pitcherId: EntityId, managerId?: EntityId): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const roster = this.requireGameRoster(gameId, teamId);
+    if (!roster.bullpenPlayerIds.includes(pitcherId)) throw new Error(`Pitcher ${pitcherId} is not in the bullpen`);
+    return structuredClone(this.recordGameAction(liveGame, {
+      type: "PITCHING_CHANGE",
+      teamId,
+      ...(managerId ? { managerId } : {}),
+      playerInId: pitcherId,
+      description: "불펜 대기 시작",
+      metadata: { warmUpOnly: true },
+    }));
+  }
+
+  usePinchHitter(
+    gameId: EntityId,
+    teamId: EntityId,
+    hitterInId: EntityId,
+    options: { managerId?: EntityId; reason?: string; defensivePosition?: BaseballPosition } = {},
+  ): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const game = this.requireGame(gameId);
+    if (teamId !== this.offenseTeamId(game, liveGame.half)) throw new Error(`Pinch hitter team must be batting: ${teamId}`);
+    const roster = this.requireGameRoster(gameId, teamId);
+    this.assertSubstitutionPlayerAvailable(liveGame, roster, hitterInId, "bench");
+    const lineupIndex = liveGame.half === "TOP" ? liveGame.awayLineupIndex : liveGame.homeLineupIndex;
+    const lineup = this.sortedLineup(roster);
+    const oldSlot = lineup[lineupIndex]!;
+    const battingOrder = oldSlot.battingOrder;
+    const slot = roster.startingLineup.find((candidate) => candidate.battingOrder === battingOrder)!;
+    const playerOutId = slot.playerId;
+    slot.playerId = hitterInId;
+    const defensivePosition = options.defensivePosition ?? slot.defensivePosition;
+    Object.assign(slot, this.makeLineupSlot(battingOrder, hitterInId, defensivePosition));
+    liveGame.currentBatterId = hitterInId;
+    this.removePlayerFromGameReserveLists(roster, hitterInId);
+    this.markPlayerRemoved(liveGame, playerOutId);
+    this.ensureBatterGameLine(liveGame.boxScore, hitterInId, teamId);
+    const action = this.recordGameAction(liveGame, {
+      type: "PINCH_HITTER",
+      teamId,
+      ...(options.managerId ? { managerId: options.managerId } : {}),
+      playerOutId,
+      playerInId: hitterInId,
+      description: options.reason ?? "대타 투입",
+      metadata: { battingOrder, defensivePosition },
+    });
+    this.assertInvariants();
+    return structuredClone(action);
+  }
+
+  usePinchRunner(
+    gameId: EntityId,
+    teamId: EntityId,
+    runnerOutId: EntityId,
+    runnerInId: EntityId,
+    options: { managerId?: EntityId; reason?: string } = {},
+  ): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const game = this.requireGame(gameId);
+    if (teamId !== this.offenseTeamId(game, liveGame.half)) throw new Error(`Pinch runner team must be batting: ${teamId}`);
+    const roster = this.requireGameRoster(gameId, teamId);
+    this.assertSubstitutionPlayerAvailable(liveGame, roster, runnerInId, "bench");
+    const base = this.findRunnerBase(liveGame, runnerOutId);
+    if (!base) throw new Error(`Runner ${runnerOutId} is not on base`);
+    const lineupSlot = roster.startingLineup.find((slot) => slot.playerId === runnerOutId);
+    if (lineupSlot) {
+      Object.assign(lineupSlot, this.makeLineupSlot(lineupSlot.battingOrder, runnerInId, lineupSlot.defensivePosition));
+    }
+    liveGame.bases[base] = runnerInId;
+    this.removePlayerFromGameReserveLists(roster, runnerInId);
+    this.markPlayerRemoved(liveGame, runnerOutId);
+    this.ensureBatterGameLine(liveGame.boxScore, runnerInId, teamId);
+    const action = this.recordGameAction(liveGame, {
+      type: "PINCH_RUNNER",
+      teamId,
+      ...(options.managerId ? { managerId: options.managerId } : {}),
+      playerOutId: runnerOutId,
+      playerInId: runnerInId,
+      description: options.reason ?? "대주자 투입",
+      metadata: { base },
+    });
+    this.assertInvariants();
+    return structuredClone(action);
+  }
+
+  makeDefensiveSubstitution(
+    gameId: EntityId,
+    teamId: EntityId,
+    playerOutId: EntityId,
+    playerInId: EntityId,
+    defensivePosition: BaseballPosition,
+    options: { managerId?: EntityId; reason?: string } = {},
+  ): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const roster = this.requireGameRoster(gameId, teamId);
+    this.assertSubstitutionPlayerAvailable(liveGame, roster, playerInId, "bench");
+    const slot = roster.startingLineup.find((candidate) => candidate.playerId === playerOutId);
+    if (!slot) throw new Error(`Player ${playerOutId} is not in the lineup`);
+    this.assertValidDefensivePosition(defensivePosition);
+    Object.assign(slot, this.makeLineupSlot(slot.battingOrder, playerInId, defensivePosition));
+    this.removePlayerFromGameReserveLists(roster, playerInId);
+    this.updateDefensivePosition(liveGame, teamId, playerOutId, playerInId, defensivePosition);
+    this.markPlayerRemoved(liveGame, playerOutId);
+    this.ensureBatterGameLine(liveGame.boxScore, playerInId, teamId);
+    const action = this.recordGameAction(liveGame, {
+      type: "DEFENSIVE_SUBSTITUTION",
+      teamId,
+      ...(options.managerId ? { managerId: options.managerId } : {}),
+      playerOutId,
+      playerInId,
+      description: options.reason ?? "수비 교체",
+      metadata: { defensivePosition },
+    });
+    this.setCurrentMatchup(liveGame);
+    this.assertInvariants();
+    return structuredClone(action);
+  }
+
+  changeDefensivePosition(
+    gameId: EntityId,
+    teamId: EntityId,
+    playerId: EntityId,
+    defensivePosition: BaseballPosition,
+    options: { managerId?: EntityId; reason?: string } = {},
+  ): GameActionHistoryEntry {
+    const liveGame = this.requireLiveGame(gameId);
+    const roster = this.requireGameRoster(gameId, teamId);
+    const slot = roster.startingLineup.find((candidate) => candidate.playerId === playerId);
+    if (!slot) throw new Error(`Player ${playerId} is not in the lineup`);
+    this.assertValidDefensivePosition(defensivePosition);
+    Object.assign(slot, this.makeLineupSlot(slot.battingOrder, playerId, defensivePosition));
+    this.syncCurrentDefenseFromRoster(liveGame, teamId);
+    const action = this.recordGameAction(liveGame, {
+      type: "POSITION_CHANGE",
+      teamId,
+      ...(options.managerId ? { managerId: options.managerId } : {}),
+      playerInId: playerId,
+      description: options.reason ?? "수비 위치 변경",
+      metadata: { defensivePosition },
+    });
+    this.assertInvariants();
+    return structuredClone(action);
+  }
+
+  setManagerGameStrategy(gameId: EntityId, teamId: EntityId, strategy: ManagerGameStrategy): ManagerGameStrategy {
+    const liveGame = this.requireLiveGame(gameId);
+    this.requireGameTeam(this.requireGame(gameId), teamId);
+    liveGame.strategies[teamId] = this.normalizeManagerGameStrategy(strategy);
+    this.assertInvariants();
+    return structuredClone(liveGame.strategies[teamId]!);
+  }
+
+  runManagerAi(gameId: EntityId, teamId: EntityId): GameActionHistoryEntry | undefined {
+    const liveGame = this.requireLiveGame(gameId);
+    const game = this.requireGame(gameId);
+    if (liveGame.status !== "IN_PROGRESS") return undefined;
+    if (teamId !== this.defenseTeamId(game, liveGame.half)) return undefined;
+    const currentPitcher = this.requirePlayer(liveGame.currentPitcherId);
+    const threshold = this.bullpenFatigueThresholdForGame(gameId);
+    const strategy = liveGame.strategies[teamId] ?? this.defaultManagerGameStrategy();
+    const pitcherLine = liveGame.boxScore.pitchers[liveGame.currentPitcherId];
+    const shouldConsider =
+      currentPitcher.gameCondition.fatigue >= threshold - strategy.bullpenAggression * 0.2 ||
+      (pitcherLine?.battersFaced ?? 0) >= 18;
+    if (!shouldConsider) return undefined;
+    const candidate = this.chooseBullpenReplacement(liveGame, teamId);
+    if (!candidate) return undefined;
+    return this.replacePitcher(gameId, teamId, candidate, { reason: "AI 투수 교체", ai: true });
   }
 
   simulateHalfInning(gameId: EntityId): LiveGame {
@@ -1183,6 +1406,7 @@ export class LeagueWorld {
     const date = this.clock.advanceDays(1);
     this.progressSeasonStatuses();
     this.refreshPlayerAges();
+    this.recoverPlayerGameConditions();
     if (options.injuries !== false) this.progressPlayerInjuries(options);
     if (options.development !== false) this.progressPlayerDevelopment();
     this.progressDailyCareers(options);
@@ -1593,6 +1817,40 @@ export class LeagueWorld {
     if (liveGame.boxScore.teams.home.runs !== liveGame.homeScore || liveGame.boxScore.teams.away.runs !== liveGame.awayScore) {
       issues.push(`Live game ${liveGame.gameId} box score runs do not match game state`);
     }
+    if (new Set(liveGame.removedPlayerIds).size !== liveGame.removedPlayerIds.length) {
+      issues.push(`Live game ${liveGame.gameId} has duplicate removed players`);
+    }
+    if (!this.allowSubstitutionReentryForGame(liveGame.gameId)) {
+      for (const playerId of liveGame.removedPlayerIds) {
+        if (battingRoster?.startingLineup.some((slot) => slot.playerId === playerId) || pitchingRoster?.startingPitcherId === playerId || runners.includes(playerId)) {
+          issues.push(`Live game ${liveGame.gameId} removed player ${playerId} was re-entered`);
+        }
+      }
+    }
+    for (const [teamId, defense] of Object.entries(liveGame.currentDefense)) {
+      if (!this.teams.has(teamId)) issues.push(`Live game ${liveGame.gameId} has defense for missing team ${teamId}`);
+      const defenders = defense.filter((slot) => slot.defensivePosition !== "DH").map((slot) => slot.playerId);
+      if (new Set(defenders).size !== defenders.length) {
+        issues.push(`Live game ${liveGame.gameId} has the same player at multiple defensive positions`);
+      }
+      const pitcherSlots = defense.filter((slot) => slot.defensivePosition === "P");
+      if (teamId === defenseTeamId && pitcherSlots.length > 0 && pitcherSlots[0]?.playerId !== liveGame.currentPitcherId) {
+        issues.push(`Live game ${liveGame.gameId} currentPitcher and defensive P do not match`);
+      }
+      for (const slot of defense) {
+        if (!this.isBaseballPosition(slot.defensivePosition)) {
+          issues.push(`Live game ${liveGame.gameId} has invalid defensive position ${slot.defensivePosition}`);
+        }
+      }
+    }
+    for (const [teamId, strategy] of Object.entries(liveGame.strategies)) {
+      if (!this.teams.has(teamId)) issues.push(`Live game ${liveGame.gameId} has strategy for missing team ${teamId}`);
+      for (const [key, value] of Object.entries(strategy)) {
+        if (!Number.isFinite(value) || value < 0 || value > 100) {
+          issues.push(`Live game ${liveGame.gameId} strategy ${key} must be between 0 and 100`);
+        }
+      }
+    }
     this.validateBoxScorePlayerTotals(liveGame.boxScore, issues);
   }
 
@@ -1872,6 +2130,203 @@ export class LeagueWorld {
 
   private isBullpenRole(role: string): role is BullpenRole {
     return ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"].includes(role);
+  }
+
+  private assertSubstitutionPlayerAvailable(
+    liveGame: LiveGame,
+    roster: GameDayRoster,
+    playerId: EntityId,
+    source: "bench" | "bullpen",
+  ): void {
+    const player = this.requirePlayer(playerId);
+    if (player.currentTeamId !== roster.teamId) throw new Error(`Player ${playerId} is not on team ${roster.teamId}`);
+    if (!roster.activePlayerIds.includes(playerId)) throw new Error(`Player ${playerId} is not active for this game`);
+    if (source === "bench" && !roster.benchPlayerIds.includes(playerId)) throw new Error(`Player ${playerId} is not on the bench`);
+    if (source === "bullpen" && !roster.bullpenPlayerIds.includes(playerId)) throw new Error(`Player ${playerId} is not in the bullpen`);
+    if (roster.startingLineup.some((slot) => slot.playerId === playerId) || this.runnerIds(liveGame).includes(playerId) || liveGame.currentPitcherId === playerId) {
+      throw new Error(`Player ${playerId} is already in the game`);
+    }
+    if (!this.allowSubstitutionReentryForGame(liveGame.gameId) && liveGame.removedPlayerIds.includes(playerId)) {
+      throw new Error(`Player ${playerId} already left the game`);
+    }
+    if (!this.isPlayerAvailableForGame(player)) throw new Error(`Player ${playerId} is not available for game`);
+  }
+
+  private markPlayerRemoved(liveGame: LiveGame, playerId: EntityId): void {
+    if (!this.allowSubstitutionReentryForGame(liveGame.gameId) && !liveGame.removedPlayerIds.includes(playerId)) {
+      liveGame.removedPlayerIds.push(playerId);
+    }
+  }
+
+  private removePlayerFromGameReserveLists(roster: GameDayRoster, playerId: EntityId): void {
+    roster.benchPlayerIds = roster.benchPlayerIds.filter((candidate) => candidate !== playerId);
+    roster.bullpenPlayerIds = roster.bullpenPlayerIds.filter((candidate) => candidate !== playerId);
+  }
+
+  private updateDefensivePosition(
+    liveGame: LiveGame,
+    teamId: EntityId,
+    playerOutId: EntityId,
+    playerInId: EntityId,
+    defensivePosition: BaseballPosition,
+  ): void {
+    const defense = liveGame.currentDefense[teamId] ?? [];
+    const existing = defense.find((slot) => slot.playerId === playerOutId || slot.defensivePosition === defensivePosition);
+    const replacement = this.makeLineupSlot(existing?.battingOrder ?? 0, playerInId, defensivePosition);
+    if (existing) {
+      Object.assign(existing, replacement);
+    } else {
+      defense.push(replacement);
+    }
+    liveGame.currentDefense[teamId] = defense;
+  }
+
+  private syncCurrentDefenseFromRoster(liveGame: LiveGame, teamId: EntityId): void {
+    liveGame.currentDefense[teamId] = this.sortedLineup(this.requireGameRoster(liveGame.gameId, teamId));
+  }
+
+  private findRunnerBase(liveGame: LiveGame, playerId: EntityId): keyof BaseState | undefined {
+    for (const base of ["first", "second", "third"] as const) {
+      if (liveGame.bases[base] === playerId) return base;
+    }
+    return undefined;
+  }
+
+  private runnerIds(liveGame: LiveGame): EntityId[] {
+    return [liveGame.bases.first, liveGame.bases.second, liveGame.bases.third].filter(
+      (playerId): playerId is EntityId => !!playerId,
+    );
+  }
+
+  private recordGameAction(
+    liveGame: LiveGame,
+    data: Omit<GameActionHistoryEntry, "inning" | "half">,
+  ): GameActionHistoryEntry {
+    const action: GameActionHistoryEntry = {
+      inning: liveGame.inning,
+      half: liveGame.half,
+      ...data,
+    };
+    liveGame.actionHistory.push(action);
+    return action;
+  }
+
+  private normalizeManagerGameStrategy(strategy: ManagerGameStrategy): ManagerGameStrategy {
+    return {
+      offensiveAggression: this.clampRating(strategy.offensiveAggression),
+      stealAggression: this.clampRating(strategy.stealAggression),
+      buntAggression: this.clampRating(strategy.buntAggression),
+      bullpenAggression: this.clampRating(strategy.bullpenAggression),
+      intentionalWalkAggression: this.clampRating(strategy.intentionalWalkAggression),
+    };
+  }
+
+  private defaultManagerGameStrategy(): ManagerGameStrategy {
+    return {
+      offensiveAggression: 50,
+      stealAggression: 50,
+      buntAggression: 50,
+      bullpenAggression: 50,
+      intentionalWalkAggression: 20,
+    };
+  }
+
+  private chooseBullpenReplacement(liveGame: LiveGame, teamId: EntityId): EntityId | undefined {
+    const game = this.requireGame(liveGame.gameId);
+    const roster = this.requireGameRoster(liveGame.gameId, teamId);
+    const runDiff = teamId === game.homeTeamId
+      ? liveGame.homeScore - liveGame.awayScore
+      : liveGame.awayScore - liveGame.homeScore;
+    const rolePriority = this.bullpenRolePriority(liveGame, runDiff);
+    const candidates = roster.bullpenPlayerIds
+      .filter((playerId) => playerId !== liveGame.currentPitcherId)
+      .filter((playerId) => !liveGame.removedPlayerIds.includes(playerId))
+      .filter((playerId) => this.isPlayerAvailableForGame(this.requirePlayer(playerId)));
+    if (candidates.length === 0) return undefined;
+    return candidates.sort((a, b) => {
+      const scoreA = this.bullpenCandidateScore(teamId, a, rolePriority, runDiff);
+      const scoreB = this.bullpenCandidateScore(teamId, b, rolePriority, runDiff);
+      return scoreB - scoreA || a.localeCompare(b);
+    })[0];
+  }
+
+  private bullpenRolePriority(liveGame: LiveGame, runDiff: number): BullpenRole[] {
+    const regulation = this.regulationInningsForGame(liveGame.gameId);
+    const closeLead = runDiff > 0 && runDiff <= this.closerLeadMaxRunsForGame(liveGame.gameId);
+    const blowout = Math.abs(runDiff) >= this.blowoutRunDifferentialForGame(liveGame.gameId);
+    if (blowout) return ["MOP_UP", "LONG_RELIEF", "FLEXIBLE", "MIDDLE_RELIEF", "SETUP", "CLOSER"];
+    if (liveGame.inning >= regulation && closeLead) return ["CLOSER", "SETUP", "FLEXIBLE", "MIDDLE_RELIEF"];
+    if (liveGame.inning >= Math.max(1, regulation - 2) && Math.abs(runDiff) <= 3) return ["SETUP", "CLOSER", "FLEXIBLE", "MIDDLE_RELIEF"];
+    if (liveGame.inning <= 5) return ["LONG_RELIEF", "MIDDLE_RELIEF", "FLEXIBLE", "SETUP"];
+    return ["MIDDLE_RELIEF", "FLEXIBLE", "SETUP", "LONG_RELIEF"];
+  }
+
+  private bullpenCandidateScore(teamId: EntityId, playerId: EntityId, rolePriority: BullpenRole[], runDiff: number): number {
+    const player = this.requirePlayer(playerId);
+    const assignment = this.bullpenAssignments.get(teamId)?.get(playerId);
+    const roles = assignment?.roles ?? ["FLEXIBLE"];
+    const roleScore = Math.max(
+      ...roles.map((role) => {
+        const index = rolePriority.indexOf(role);
+        return index === -1 ? 0 : (rolePriority.length - index) * 25;
+      }),
+    );
+    const closerPenalty = Math.abs(runDiff) >= this.blowoutRunDifferentialForTeam(teamId) && roles.includes("CLOSER") ? -200 : 0;
+    const ability =
+      player.pitchingRatings.velocity * 0.2 +
+      player.pitchingRatings.control * 0.25 +
+      player.pitchingRatings.movement * 0.25 +
+      player.pitchingRatings.pitchQuality * 0.2 +
+      player.pitchingRatings.stamina * 0.1;
+    const condition = player.gameCondition.readiness - player.gameCondition.fatigue * 0.6;
+    return roleScore + ability + condition * 0.25 + closerPenalty + this.rng.next() * 0.0001;
+  }
+
+  private assertValidDefensivePosition(position: BaseballPosition): void {
+    if (!this.isBaseballPosition(position)) throw new Error(`Invalid defensive position: ${position}`);
+  }
+
+  private applyGameFatigue(batterId: EntityId, pitcherId: EntityId, result: PlateAppearanceResult): void {
+    const batter = this.requirePlayer(batterId);
+    const pitcher = this.requirePlayer(pitcherId);
+    const batterCost = this.isHit(result) ? 2 : result === "WALK" ? 1 : 0.8;
+    const pitcherCost = 1.8 + (result === "WALK" ? 0.8 : 0) + (this.isHit(result) ? 0.5 : 0);
+    batter.gameCondition.fatigue = this.clampRating(batter.gameCondition.fatigue + batterCost);
+    batter.gameCondition.readiness = this.clampRating(batter.gameCondition.readiness - batterCost * 0.25);
+    pitcher.gameCondition.fatigue = this.clampRating(pitcher.gameCondition.fatigue + pitcherCost * (1.2 - pitcher.pitchingRatings.stamina / 200));
+    pitcher.gameCondition.readiness = this.clampRating(pitcher.gameCondition.readiness - pitcherCost * 0.35);
+  }
+
+  private recoverDailyFatigue(player: Player): void {
+    const recovery = 8 + player.developmentProfile.durability * 0.08 + player.pitchingRatings.stamina * 0.03;
+    player.gameCondition.fatigue = this.clampRating(player.gameCondition.fatigue - recovery);
+    player.gameCondition.readiness = this.clampRating(player.gameCondition.readiness + recovery * 0.6);
+    player.gameCondition.availableForGame = player.injury.status !== "INJURED" && player.gameCondition.readiness >= 40;
+  }
+
+  private allowSubstitutionReentryForGame(gameId: EntityId): boolean {
+    const game = this.requireGame(gameId);
+    return this.requireLeague(this.requireSeason(game.seasonId).leagueId).allowSubstitutionReentry ?? false;
+  }
+
+  private bullpenFatigueThresholdForGame(gameId: EntityId): number {
+    const game = this.requireGame(gameId);
+    return this.requireLeague(this.requireSeason(game.seasonId).leagueId).bullpenFatigueThreshold ?? 55;
+  }
+
+  private closerLeadMaxRunsForGame(gameId: EntityId): number {
+    const game = this.requireGame(gameId);
+    return this.requireLeague(this.requireSeason(game.seasonId).leagueId).closerLeadMaxRuns ?? 3;
+  }
+
+  private blowoutRunDifferentialForGame(gameId: EntityId): number {
+    const game = this.requireGame(gameId);
+    return this.requireLeague(this.requireSeason(game.seasonId).leagueId).blowoutRunDifferential ?? 6;
+  }
+
+  private blowoutRunDifferentialForTeam(teamId: EntityId): number {
+    const team = this.requireTeam(teamId);
+    return this.requireLeague(team.leagueId).blowoutRunDifferential ?? 6;
   }
 
   private accumulateGameStats(game: GameFixture, boxScore: BoxScore): void {
@@ -3068,6 +3523,12 @@ export class LeagueWorld {
   private refreshPlayerAges(): void {
     for (const player of this.players.values()) {
       player.age = this.calculateAge(player.birthDate);
+    }
+  }
+
+  private recoverPlayerGameConditions(): void {
+    for (const player of this.players.values()) {
+      if (player.status !== "RETIRED") this.recoverDailyFatigue(player);
     }
   }
 

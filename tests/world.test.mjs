@@ -2333,3 +2333,204 @@ test("season stats invariants catch invalid local mutations", () => {
   assert.ok(issues.some((issue) => issue.includes("TOTAL hits does not match team splits")));
   assert.equal(total.hits, 1);
 });
+
+test("manager can replace a pitcher and pitcher lines stay separate", () => {
+  const world = createWorld();
+  const { game, homePlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const starter = homePlayers.at(-1);
+  const reliever = homePlayers.at(-2);
+
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+  const action = world.replacePitcher(game.id, "team_seoul", reliever, { managerId: "mgr_home", reason: "불펜 투입" });
+  world.applyPlateAppearanceResult(game.id, "STRIKEOUT");
+
+  const liveGame = world.liveGames.get(game.id);
+  assert.equal(action.type, "PITCHING_CHANGE");
+  assert.equal(liveGame.currentPitcherId, reliever);
+  assert.equal(liveGame.boxScore.pitchers[starter].battersFaced, 1);
+  assert.equal(liveGame.boxScore.pitchers[reliever].battersFaced, 1);
+  assert.ok(liveGame.removedPlayerIds.includes(starter));
+});
+
+test("pinch hitter keeps batting order slot", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const oldBatter = awayPlayers[0];
+  const pinchHitter = awayPlayers.at(-2);
+
+  const action = world.usePinchHitter(game.id, "team_busan", pinchHitter, { defensivePosition: "LF" });
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+
+  const roster = [...world.gameRosters.values()].find((candidate) => candidate.gameId === game.id && candidate.teamId === "team_busan");
+  const firstSlot = roster.startingLineup.find((slot) => slot.battingOrder === 1);
+  assert.equal(action.type, "PINCH_HITTER");
+  assert.equal(firstSlot.playerId, pinchHitter);
+  assert.equal(firstSlot.battingOrder, 1);
+  assert.equal(world.liveGames.get(game.id).boxScore.batters[pinchHitter].hits, 1);
+  assert.ok(world.liveGames.get(game.id).removedPlayerIds.includes(oldBatter));
+});
+
+test("pinch runner takes over the base and owns the later run", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+  const runnerOut = awayPlayers[0];
+  const runnerIn = awayPlayers.at(-2);
+
+  const action = world.usePinchRunner(game.id, "team_busan", runnerOut, runnerIn);
+  world.applyPlateAppearanceResult(game.id, "HOME_RUN");
+
+  const liveGame = world.liveGames.get(game.id);
+  assert.equal(action.type, "PINCH_RUNNER");
+  assert.equal(liveGame.boxScore.batters[runnerOut].runs, 0);
+  assert.equal(liveGame.boxScore.batters[runnerIn].runs, 1);
+  assert.ok(liveGame.removedPlayerIds.includes(runnerOut));
+});
+
+test("defensive substitution and position changes update current defense", () => {
+  const world = createWorld();
+  const { game, homePlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const playerOut = homePlayers[0];
+  const playerIn = homePlayers.at(-2);
+
+  const sub = world.makeDefensiveSubstitution(game.id, "team_seoul", playerOut, playerIn, "RF");
+  const move = world.changeDefensivePosition(game.id, "team_seoul", playerIn, "LF");
+
+  const defense = world.liveGames.get(game.id).currentDefense.team_seoul;
+  assert.equal(sub.type, "DEFENSIVE_SUBSTITUTION");
+  assert.equal(move.type, "POSITION_CHANGE");
+  assert.ok(defense.some((slot) => slot.playerId === playerIn && slot.defensivePosition === "LF"));
+  assert.ok(world.liveGames.get(game.id).removedPlayerIds.includes(playerOut));
+});
+
+test("substitution rejects re-entry, other-team players, and non-bullpen pitchers", () => {
+  const world = createWorld();
+  const { game, homePlayers, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const oldBatter = awayPlayers[0];
+  const bench = awayPlayers.at(-2);
+  world.usePinchHitter(game.id, "team_busan", bench);
+
+  assert.throws(() => world.usePinchHitter(game.id, "team_busan", oldBatter), /not on the bench|already left/);
+  assert.throws(() => world.usePinchHitter(game.id, "team_busan", homePlayers[0]), /not on team/);
+  assert.throws(() => world.replacePitcher(game.id, "team_seoul", homePlayers[0]), /not in the bullpen/);
+});
+
+test("game play adds fatigue and advanceDay recovers it", () => {
+  const world = createWorld();
+  const { game, homePlayers, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const pitcher = homePlayers.at(-1);
+  const batter = awayPlayers[0];
+
+  world.applyPlateAppearanceResult(game.id, "HOME_RUN");
+  const pitcherFatigue = world.players.get(pitcher).gameCondition.fatigue;
+  const batterFatigue = world.players.get(batter).gameCondition.fatigue;
+  world.advanceDay({ injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+
+  assert.ok(pitcherFatigue > 0);
+  assert.ok(batterFatigue > 0);
+  assert.ok(world.players.get(pitcher).gameCondition.fatigue < pitcherFatigue);
+});
+
+function createAiBullpenGame(seed, scoreState) {
+  const world = createWorld(seed);
+  const game = createScheduledGame(world);
+  const homePlayers = seedTeamPlayers(world, "team_seoul", `ai_home_${seed}`, lineupPositionsWithDh, 4);
+  const awayPlayers = seedTeamPlayers(world, "team_busan", `ai_away_${seed}`, lineupPositionsWithDh, 2);
+  const homeBench = homePlayers.slice(9);
+  const awayBench = awayPlayers.slice(9);
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: homePlayers,
+    startingLineup: lineupFrom(homePlayers, lineupPositionsWithDh),
+    startingPitcherId: homePlayers.at(-1),
+    benchPlayerIds: homeBench,
+    bullpenPlayerIds: homeBench.slice(0, -1),
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_busan",
+    activePlayerIds: awayPlayers,
+    startingLineup: lineupFrom(awayPlayers, lineupPositionsWithDh),
+    startingPitcherId: awayPlayers.at(-1),
+    benchPlayerIds: awayBench,
+    bullpenPlayerIds: awayBench.slice(0, -1),
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+  const [longRelief, setup, closer] = homeBench;
+  world.assignBullpenRole("team_seoul", longRelief, ["LONG_RELIEF"]);
+  world.assignBullpenRole("team_seoul", setup, ["SETUP"]);
+  world.assignBullpenRole("team_seoul", closer, ["CLOSER"]);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.inning = scoreState.inning;
+  liveGame.half = "TOP";
+  liveGame.homeScore = scoreState.homeScore;
+  liveGame.awayScore = scoreState.awayScore;
+  liveGame.boxScore.teams.home.runs = scoreState.homeScore;
+  liveGame.boxScore.teams.away.runs = scoreState.awayScore;
+  world.players.get(liveGame.currentPitcherId).gameCondition.fatigue = 90;
+  return { world, game, longRelief, setup, closer };
+}
+
+test("manager AI selects closer, setup, and long relief by game context", () => {
+  const close = createAiBullpenGame(701, { inning: 9, homeScore: 4, awayScore: 2 });
+  const closeAction = close.world.runManagerAi(close.game.id, "team_seoul");
+  assert.equal(closeAction.playerInId, close.closer);
+
+  const setup = createAiBullpenGame(702, { inning: 7, homeScore: 3, awayScore: 3 });
+  const setupAction = setup.world.runManagerAi(setup.game.id, "team_seoul");
+  assert.equal(setupAction.playerInId, setup.setup);
+
+  const early = createAiBullpenGame(703, { inning: 3, homeScore: 1, awayScore: 4 });
+  const earlyAction = early.world.runManagerAi(early.game.id, "team_seoul");
+  assert.equal(earlyAction.playerInId, early.longRelief);
+});
+
+test("manager AI avoids closer in a blowout and is deterministic with the same seed", () => {
+  function run(seed) {
+    const { world, game, closer } = createAiBullpenGame(seed, { inning: 9, homeScore: 10, awayScore: 1 });
+    const action = world.runManagerAi(game.id, "team_seoul");
+    return { action, closer };
+  }
+
+  const first = run(808);
+  assert.notEqual(first.action.playerInId, first.closer);
+  assert.deepEqual(first, run(808));
+});
+
+test("game action history records manager interventions", () => {
+  const world = createWorld();
+  const { game, homePlayers, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  world.warmUpPitcher(game.id, "team_seoul", homePlayers.at(-2), "mgr_home");
+  world.usePinchHitter(game.id, "team_busan", awayPlayers.at(-2), { managerId: "mgr_away" });
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+  world.usePinchRunner(game.id, "team_busan", awayPlayers.at(-2), awayPlayers.at(-1), { managerId: "mgr_away" });
+
+  const history = world.liveGames.get(game.id).actionHistory;
+  assert.deepEqual(history.map((action) => action.type), ["PITCHING_CHANGE", "PINCH_HITTER", "PINCH_RUNNER"]);
+  assert.equal(history[0].metadata.warmUpOnly, true);
+});
+
+test("substitution invariants catch invalid local mutations", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.removedPlayerIds.push(awayPlayers[0]);
+  liveGame.currentDefense.team_busan[1].playerId = liveGame.currentDefense.team_busan[0].playerId;
+  liveGame.strategies.team_busan.bullpenAggression = 200;
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("removed player")));
+  assert.ok(issues.some((issue) => issue.includes("multiple defensive positions")));
+  assert.ok(issues.some((issue) => issue.includes("strategy bullpenAggression")));
+});

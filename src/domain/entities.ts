@@ -6,6 +6,7 @@ import type {
   BullpenRole,
   ContractStatus,
   CompetitionType,
+  GameActionType,
   GameStatus,
   GameHalf,
   InjurySeverity,
@@ -44,6 +45,10 @@ export interface League {
   maxInnings?: number;
   battingQualificationPlateAppearances?: number;
   pitchingQualificationOuts?: number;
+  allowSubstitutionReentry?: boolean;
+  bullpenFatigueThreshold?: number;
+  closerLeadMaxRuns?: number;
+  blowoutRunDifferential?: number;
   gameRosterRules?: GameRosterRules;
 }
 
@@ -308,6 +313,30 @@ export interface LiveGame {
   status: LiveGameStatus;
   boxScore: BoxScore;
   playByPlay: PlayByPlayEvent[];
+  actionHistory: GameActionHistoryEntry[];
+  removedPlayerIds: EntityId[];
+  currentDefense: Record<string, StartingLineupSlot[]>;
+  strategies: Record<string, ManagerGameStrategy>;
+}
+
+export interface ManagerGameStrategy {
+  offensiveAggression: number;
+  stealAggression: number;
+  buntAggression: number;
+  bullpenAggression: number;
+  intentionalWalkAggression: number;
+}
+
+export interface GameActionHistoryEntry {
+  inning: number;
+  half: GameHalf;
+  type: GameActionType;
+  teamId: EntityId;
+  managerId?: EntityId;
+  playerOutId?: EntityId;
+  playerInId?: EntityId;
+  description: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PlayByPlayEvent {

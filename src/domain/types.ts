@@ -77,6 +77,13 @@ export type BattingLeaderCategory = "AVG" | "HR" | "RBI" | "H" | "OPS";
 
 export type PitchingLeaderCategory = "ERA" | "W" | "SO" | "SV" | "WHIP";
 
+export type GameActionType =
+  | "PITCHING_CHANGE"
+  | "PINCH_HITTER"
+  | "PINCH_RUNNER"
+  | "DEFENSIVE_SUBSTITUTION"
+  | "POSITION_CHANGE";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"
