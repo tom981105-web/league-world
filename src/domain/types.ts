@@ -11,9 +11,17 @@ export type PlayerStatus =
 
 export type ManagerStatus = "EMPLOYED" | "UNEMPLOYED" | "RETIRED";
 
+export type BattingSide = "L" | "R" | "S";
+
+export type ThrowingHand = "L" | "R";
+
 export type TeamType = "CLUB" | "SCHOOL" | "NATIONAL";
 
 export type PersonType = "PLAYER" | "MANAGER";
+
+export type InjuryStatus = "HEALTHY" | "INJURED" | "RECOVERING";
+
+export type InjurySeverity = "MINOR" | "MODERATE" | "MAJOR";
 
 export type LeagueCategory =
   | "PROFESSIONAL"
@@ -23,6 +31,10 @@ export type LeagueCategory =
 
 export type WorldEventType =
   | "PLAYER_CREATED"
+  | "PLAYER_DEVELOPED"
+  | "PLAYER_DECLINED"
+  | "PLAYER_INJURED"
+  | "PLAYER_RECOVERED"
   | "PLAYER_CAREER_CHANGED"
   | "PLAYER_MOVED"
   | "PLAYER_RELEASED"

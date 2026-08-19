@@ -60,6 +60,48 @@ function createWorld(seed = 2027) {
   return world;
 }
 
+function createPlayer(overrides = {}) {
+  return {
+    id: "player_model",
+    name: "이하람",
+    birthDate: "2010-04-15",
+    nationality: "Korea Republic",
+    nationalityCode: "KR",
+    bats: "R",
+    throws: "R",
+    primaryPosition: "SS",
+    secondaryPositions: ["2B"],
+    status: "AMATEUR",
+    currentAbility: 35,
+    potentialAbility: 75,
+    battingRatings: {
+      contact: 35,
+      power: 30,
+      plateDiscipline: 34,
+      speed: 43,
+      fielding: 41,
+      arm: 39,
+    },
+    pitchingRatings: {
+      velocity: 20,
+      control: 22,
+      movement: 18,
+      stamina: 25,
+      pitchQuality: 19,
+      repertoire: [{ name: "Fastball", quality: 20 }],
+    },
+    developmentProfile: {
+      developmentRate: 75,
+      consistency: 80,
+      durability: 70,
+      peakAgeRange: { start: 24, end: 30 },
+      declineRate: 45,
+    },
+    injury: { status: "HEALTHY" },
+    ...overrides,
+  };
+}
+
 test("countries and leagues are owned by the world before teams are added", () => {
   const world = createWorld();
 
@@ -550,4 +592,300 @@ test("invariant validation catches contradictions between current state and care
 
   assert.throws(() => world.assertInvariants(), /World invariant violation/);
   assert.ok(world.validateInvariants().some((issue) => issue.includes("RETIRED")));
+});
+
+test("player model fills age, handedness, ratings, development profile, and injury defaults", () => {
+  const world = createWorld();
+  world.addPlayer({
+    id: "player_defaults",
+    name: "신우진",
+    birthDate: "2010-04-15",
+    nationalityCode: "KR",
+    primaryPosition: "CF",
+    status: "AMATEUR",
+    currentAbility: 40,
+    potentialAbility: 70,
+  });
+
+  const player = world.players.get("player_defaults");
+  assert.equal(player?.age, 16);
+  assert.equal(player?.nationality, "KR");
+  assert.equal(player?.bats, "R");
+  assert.equal(player?.throws, "R");
+  assert.deepEqual(player?.secondaryPositions, []);
+  assert.equal(player?.battingRatings.contact, 40);
+  assert.equal(player?.pitchingRatings.pitchQuality, 40);
+  assert.equal(player?.developmentProfile.peakAgeRange.start, 24);
+  assert.deepEqual(player?.injury, { status: "HEALTHY" });
+});
+
+test("player age is synchronized when LeagueWorld advances time", () => {
+  const world = new LeagueWorld(new WorldClock("2027-04-14"), new Mulberry32Random(1));
+  world.addCountry({ id: "country_kr", code: "KR", name: "Korea Republic" });
+  world.addLeague({
+    id: "league_kr1",
+    countryId: "country_kr",
+    name: "Korea Premier Baseball",
+    level: 1,
+    category: "PROFESSIONAL",
+  });
+  world.addTeam({ id: "team_seoul", leagueId: "league_kr1", name: "Seoul Falcons", teamType: "CLUB" });
+  world.addPlayer(createPlayer({ id: "birthday_player", birthDate: "2010-04-15" }));
+
+  assert.equal(world.players.get("birthday_player")?.age, 16);
+  world.advanceDay({
+    injuries: false,
+    development: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.equal(world.players.get("birthday_player")?.age, 17);
+});
+
+test("player development is deterministic with the same seed", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    world.addPlayer(createPlayer({
+      id: "deterministic_dev",
+      currentAbility: 32,
+      potentialAbility: 82,
+      developmentProfile: {
+        developmentRate: 100,
+        consistency: 90,
+        durability: 80,
+        peakAgeRange: { start: 24, end: 30 },
+        declineRate: 40,
+      },
+    }));
+
+    world.advanceDays(180, {
+      injuries: false,
+      playerCareerOptions: () => [],
+      managerCareerOptions: () => [],
+    });
+
+    const player = world.players.get("deterministic_dev");
+    return {
+      currentAbility: player?.currentAbility,
+      battingRatings: player?.battingRatings,
+      pitchingRatings: player?.pitchingRatings,
+      events: world.events,
+    };
+  }
+
+  assert.deepEqual(run(701), run(701));
+});
+
+test("young players can grow through daily development ticks", () => {
+  const world = createWorld(11);
+  world.addPlayer(createPlayer({
+    id: "young_growth",
+    birthDate: "2010-01-01",
+    currentAbility: 25,
+    potentialAbility: 80,
+    developmentProfile: {
+      developmentRate: 100,
+      consistency: 100,
+      durability: 85,
+      peakAgeRange: { start: 24, end: 30 },
+      declineRate: 30,
+    },
+  }));
+
+  world.advanceDays(120, {
+    injuries: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.ok(world.players.get("young_growth")?.currentAbility > 25);
+});
+
+test("major development jumps are recorded as world events", () => {
+  const world = createWorld(7);
+  world.addPlayer(createPlayer({
+    id: "jump_player",
+    currentAbility: 10,
+    potentialAbility: 95,
+    developmentProfile: {
+      developmentRate: 100,
+      consistency: 100,
+      durability: 100,
+      peakAgeRange: { start: 24, end: 30 },
+      declineRate: 1,
+    },
+  }));
+
+  world.advanceDays(5, {
+    injuries: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  const event = world.events.find((candidate) => candidate.type === "PLAYER_DEVELOPED");
+  assert.equal(event?.subjectId, "jump_player");
+  assert.equal(event?.payload?.delta, 5);
+});
+
+test("veteran players can decline after their peak window", () => {
+  const world = createWorld(9);
+  world.addPlayer(createPlayer({
+    id: "veteran_decline",
+    birthDate: "1990-01-01",
+    currentAbility: 72,
+    potentialAbility: 78,
+    developmentProfile: {
+      developmentRate: 10,
+      consistency: 60,
+      durability: 10,
+      peakAgeRange: { start: 24, end: 29 },
+      declineRate: 100,
+    },
+  }));
+
+  world.advanceDays(180, {
+    injuries: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.ok(world.players.get("veteran_decline")?.currentAbility < 72);
+});
+
+test("high potential ability does not force growth success", () => {
+  const world = createWorld(19);
+  world.addPlayer(createPlayer({
+    id: "growth_failure",
+    currentAbility: 20,
+    potentialAbility: 95,
+    developmentProfile: {
+      developmentRate: 0,
+      consistency: 100,
+      durability: 70,
+      peakAgeRange: { start: 24, end: 30 },
+      declineRate: 20,
+    },
+  }));
+
+  world.advanceDays(365, {
+    injuries: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.equal(world.players.get("growth_failure")?.currentAbility, 20);
+});
+
+test("low evaluated late bloomers can improve after the normal peak start", () => {
+  const world = createWorld(15);
+  world.addPlayer(createPlayer({
+    id: "late_bloomer",
+    birthDate: "1999-01-01",
+    currentAbility: 28,
+    potentialAbility: 72,
+    developmentProfile: {
+      developmentRate: 100,
+      consistency: 0,
+      durability: 80,
+      peakAgeRange: { start: 22, end: 26 },
+      declineRate: 5,
+    },
+  }));
+
+  world.advanceDays(900, {
+    injuries: false,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.ok(world.players.get("late_bloomer")?.currentAbility > 28);
+});
+
+test("injury occurrence and recovery are driven by seeded world progression", () => {
+  const world = createWorld(88);
+  world.addPlayer(createPlayer({
+    id: "injury_player",
+    status: "PROFESSIONAL",
+    currentTeamId: "team_seoul",
+    developmentProfile: {
+      developmentRate: 30,
+      consistency: 70,
+      durability: 0,
+      peakAgeRange: { start: 24, end: 30 },
+      declineRate: 30,
+    },
+  }));
+
+  world.advanceDay({
+    development: false,
+    injuryChance: () => 1,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+  const injured = world.players.get("injury_player");
+  const recoveryDays = injured?.injury.expectedRecoveryDays;
+
+  assert.equal(injured?.injury.status, "INJURED");
+  assert.equal(world.events.at(-1)?.type, "PLAYER_INJURED");
+  assert.ok(recoveryDays > 0);
+
+  world.advanceDays(recoveryDays + 20, {
+    development: false,
+    injuryChance: () => 0,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  assert.equal(world.players.get("injury_player")?.injury.status, "HEALTHY");
+  assert.equal(world.events.at(-1)?.type, "PLAYER_RECOVERED");
+});
+
+test("injured players keep coherent team, status, injury, and career state", () => {
+  const world = createWorld(44);
+  world.addPlayer(createPlayer({
+    id: "coherent_injury",
+    status: "PROFESSIONAL",
+    currentTeamId: "team_busan",
+  }));
+
+  world.advanceDay({
+    development: false,
+    injuryChance: () => 1,
+    playerCareerOptions: () => [],
+    managerCareerOptions: () => [],
+  });
+
+  const player = world.players.get("coherent_injury");
+  assert.equal(player?.status, "PROFESSIONAL");
+  assert.equal(player?.currentTeamId, "team_busan");
+  assert.equal(player?.careerEntries.at(-1)?.teamId, "team_busan");
+  assert.equal(player?.injury.status, "INJURED");
+  assert.deepEqual(world.validateInvariants(), []);
+});
+
+test("player model invariant catches invalid ratings, age, and injury data", () => {
+  const world = createWorld();
+  world.addPlayer(createPlayer({
+    id: "invalid_model",
+    currentAbility: 45,
+    potentialAbility: 60,
+  }));
+
+  const player = world.players.get("invalid_model");
+  player.age = 99;
+  player.battingRatings.contact = 120;
+  player.injury = {
+    status: "INJURED",
+    severity: "MAJOR",
+    expectedRecoveryDays: 10,
+    daysRemaining: 11,
+    startedOn: "2027-01-01",
+  };
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("age")));
+  assert.ok(issues.some((issue) => issue.includes("contact")));
+  assert.ok(issues.some((issue) => issue.includes("injury days remaining")));
+  assert.throws(() => world.assertInvariants(), /World invariant violation/);
 });

@@ -1,11 +1,15 @@
 import type {
   EntityId,
+  BattingSide,
+  InjurySeverity,
+  InjuryStatus,
   ISODate,
   LeagueCategory,
   ManagerStatus,
   PersonType,
   PlayerStatus,
   TeamType,
+  ThrowingHand,
   WorldEventType,
 } from "./types.js";
 
@@ -35,14 +39,71 @@ export interface Player {
   id: EntityId;
   name: string;
   birthDate: ISODate;
+  age: number;
+  nationality: string;
   nationalityCode: string;
+  bats: BattingSide;
+  throws: ThrowingHand;
   primaryPosition: string;
+  secondaryPositions: string[];
+  heightCm?: number;
+  weightKg?: number;
   status: PlayerStatus;
   currentAbility: number;
   potentialAbility: number;
+  battingRatings: BattingRatings;
+  pitchingRatings: PitchingRatings;
+  developmentProfile: PlayerDevelopmentProfile;
+  injury: PlayerInjury;
   currentTeamId?: EntityId;
   careerEntries: CareerEntry[];
 }
+
+export interface BattingRatings {
+  contact: number;
+  power: number;
+  plateDiscipline: number;
+  speed: number;
+  fielding: number;
+  arm: number;
+}
+
+export interface PitchingRatings {
+  velocity: number;
+  control: number;
+  movement: number;
+  stamina: number;
+  pitchQuality: number;
+  repertoire: Pitch[];
+}
+
+export interface Pitch {
+  name: string;
+  quality: number;
+}
+
+export interface PlayerDevelopmentProfile {
+  developmentRate: number;
+  consistency: number;
+  durability: number;
+  peakAgeRange: {
+    start: number;
+    end: number;
+  };
+  declineRate: number;
+}
+
+export type PlayerInjury =
+  | {
+      status: "HEALTHY";
+    }
+  | {
+      status: Exclude<InjuryStatus, "HEALTHY">;
+      severity: InjurySeverity;
+      expectedRecoveryDays: number;
+      daysRemaining: number;
+      startedOn: ISODate;
+    };
 
 export interface Manager {
   id: EntityId;
