@@ -1,7 +1,7 @@
-import type { Manager, Player, Team, WorldEvent } from "../domain/entities";
-import type { EntityId, ISODate, WorldEventType } from "../domain/types";
-import { WorldClock } from "./clock";
-import type { RandomSource } from "./rng";
+import type { Manager, Player, Team, WorldEvent } from "../domain/entities.js";
+import type { EntityId, ISODate, WorldEventType } from "../domain/types.js";
+import { WorldClock } from "./clock.js";
+import type { RandomSource } from "./rng.js";
 
 export class LeagueWorld {
   readonly players = new Map<EntityId, Player>();
@@ -20,12 +20,18 @@ export class LeagueWorld {
 
   addPlayer(player: Player): void {
     this.players.set(player.id, structuredClone(player));
-    this.record("PLAYER_CREATED", { subjectId: player.id, teamId: player.currentTeamId });
+    this.record("PLAYER_CREATED", {
+      subjectId: player.id,
+      ...(player.currentTeamId ? { teamId: player.currentTeamId } : {}),
+    });
   }
 
   addManager(manager: Manager): void {
     this.managers.set(manager.id, structuredClone(manager));
-    this.record("MANAGER_CREATED", { subjectId: manager.id, teamId: manager.currentTeamId });
+    this.record("MANAGER_CREATED", {
+      subjectId: manager.id,
+      ...(manager.currentTeamId ? { teamId: manager.currentTeamId } : {}),
+    });
   }
 
   movePlayer(playerId: EntityId, toTeamId: EntityId, reason: string): void {

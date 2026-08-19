@@ -1,6 +1,6 @@
-import type { Player } from "../domain/entities";
-import type { PlayerStatus } from "../domain/types";
-import type { RandomSource } from "./rng";
+import type { Player } from "../domain/entities.js";
+import type { PlayerStatus } from "../domain/types.js";
+import type { RandomSource } from "./rng.js";
 
 export interface CareerOption {
   nextStatus: PlayerStatus;
@@ -33,5 +33,5 @@ export function chooseCareerOption(
     roll -= option.weight;
     if (roll < 0) return option;
   }
-  return positive[positive.length - 1];
+  return positive[positive.length - 1]!;
 }

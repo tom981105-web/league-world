@@ -4,12 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "vitest": "^3.0.0"
+    "typescript": "^5.0.0"
   }
 }

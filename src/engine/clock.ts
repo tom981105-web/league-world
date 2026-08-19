@@ -1,4 +1,4 @@
-import type { ISODate } from "../domain/types";
+import type { ISODate } from "../domain/types.js";
 
 export class WorldClock {
   private current: Date;

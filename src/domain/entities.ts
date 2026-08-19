@@ -6,7 +6,7 @@ import type {
   PlayerStatus,
   TeamType,
   WorldEventType,
-} from "./types";
+} from "./types.js";
 
 export interface Country {
   id: EntityId;
