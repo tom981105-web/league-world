@@ -6,6 +6,7 @@ import {
   type WorldSaveData,
 } from "../index.js";
 import type { SeedWorldResult } from "./seedWorld.js";
+import type { SeedWorldPreset } from "./seedWorld.js";
 
 export type SaveSlotKey = "autosave" | "slot1" | "slot2" | "slot3";
 
@@ -25,6 +26,7 @@ export interface WebSaveFile {
   savedAt: string;
   app: {
     seed: number;
+    preset?: SeedWorldPreset;
     userManagerId: EntityId;
     userTeamId: EntityId;
     seasonId: EntityId;
@@ -46,6 +48,7 @@ export function createWebSave(bundle: SeedWorldResult, name: string): WebSaveFil
     savedAt: new Date().toISOString(),
     app: {
       seed: bundle.seed,
+      preset: bundle.preset,
       userManagerId: bundle.userManagerId,
       userTeamId: bundle.userTeamId,
       seasonId: bundle.seasonId,
@@ -67,6 +70,7 @@ export function restoreWebSave(save: unknown): SeedWorldResult {
     competitionId: parsed.app.competitionId,
     draftId: parsed.app.draftId,
     seed: parsed.app.seed,
+    preset: parsed.app.preset ?? "STANDARD",
   };
 }
 

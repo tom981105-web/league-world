@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deserializeWorld, serializeWorld } from "../dist/index.js";
-import { createSeedWorld } from "../dist/web/seedWorld.js";
+import { createSmallSeedWorld } from "../dist/web/seedWorld.js";
 
 function firstScheduledGame(world) {
   const game = [...world.games.values()].find((item) => item.status === "SCHEDULED");
@@ -34,14 +34,14 @@ function snapshotCore(world, bundle) {
 }
 
 test("new world serializes and deserializes with invariants intact", () => {
-  const bundle = createSeedWorld(77);
+  const bundle = createSmallSeedWorld(77);
   const restored = deserializeWorld(serializeWorld(bundle.world));
   assert.deepEqual(restored.validateInvariants(), []);
   assert.deepEqual(snapshotCore(restored, bundle), snapshotCore(bundle.world, bundle));
 });
 
 test("completed game, standings, season stats, career entries, and events survive restore", () => {
-  const bundle = createSeedWorld(88);
+  const bundle = createSmallSeedWorld(88);
   const game = firstScheduledGame(bundle.world);
   prepareGame(bundle.world, game);
   const completed = bundle.world.simulateGame(game.id);
@@ -57,7 +57,7 @@ test("completed game, standings, season stats, career entries, and events surviv
 });
 
 test("manager move and trade state survive restore", () => {
-  const bundle = createSeedWorld(99);
+  const bundle = createSmallSeedWorld(99);
   const offer = bundle.world.managerContractOffers.get("manager_offer_osaka_2027");
   bundle.world.acceptManagerOffer(offer.id);
   const userPlayer = [...bundle.world.players.values()].find((player) => player.currentOrganizationId === "org_seoul" && player.primaryPosition !== "P");
@@ -78,7 +78,7 @@ test("manager move and trade state survive restore", () => {
 });
 
 test("in-progress live game survives restore", () => {
-  const bundle = createSeedWorld(101);
+  const bundle = createSmallSeedWorld(101);
   const game = firstScheduledGame(bundle.world);
   prepareGame(bundle.world, game);
   bundle.world.startGame(game.id);
@@ -89,8 +89,8 @@ test("in-progress live game survives restore", () => {
 });
 
 test("restored RNG state reproduces future simulation", () => {
-  const original = createSeedWorld(123);
-  const restored = createSeedWorld(123);
+  const original = createSmallSeedWorld(123);
+  const restored = createSmallSeedWorld(123);
   const save = serializeWorld(original.world);
   const loaded = deserializeWorld(save);
   const gameA = firstScheduledGame(original.world);
@@ -105,7 +105,7 @@ test("restored RNG state reproduces future simulation", () => {
 });
 
 test("unsupported saveVersion and corrupted data are rejected without mutating caller world", () => {
-  const bundle = createSeedWorld(55);
+  const bundle = createSmallSeedWorld(55);
   const save = serializeWorld(bundle.world);
   assert.throws(() => deserializeWorld({ ...save, saveVersion: 999 }), /지원하지 않는 저장 버전/);
   const broken = structuredClone(save);

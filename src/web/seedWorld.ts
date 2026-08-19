@@ -8,6 +8,9 @@ import {
   type ISODate,
   type Player,
 } from "../index.js";
+import { countryNameForCode, generatePersonName, type NameCountryCode } from "./nameGenerator.js";
+
+export type SeedWorldPreset = "SMALL" | "STANDARD";
 
 export interface SeedWorldResult {
   world: LeagueWorld;
@@ -17,6 +20,7 @@ export interface SeedWorldResult {
   competitionId: EntityId;
   draftId: EntityId;
   seed: number;
+  preset: SeedWorldPreset;
 }
 
 export interface SeedWorldOptions {
@@ -24,131 +28,158 @@ export interface SeedWorldOptions {
   managerNationalityCode?: string;
   startMode?: "UNEMPLOYED" | "CLUB";
   organizationId?: EntityId;
+  preset?: SeedWorldPreset;
+}
+
+interface SeedOrganizationConfig {
+  id: EntityId;
+  name: string;
+  city: string;
+  tier: "CONTENDER" | "UPPER" | "MID" | "LOWER" | "REBUILDING";
+}
+
+interface AmateurStageConfig {
+  key: "MIDDLE_SCHOOL" | "HIGH_SCHOOL" | "COLLEGE" | "INDEPENDENT";
+  label: string;
+  count: number;
+  status: Player["status"];
+  birthYearStart: number;
+  birthYearSpan: number;
 }
 
 const firstLevelPositions: BaseballPosition[] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
-const pitcherRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "FLEXIBLE"];
+const topHitters: BaseballPosition[] = ["C", "C", "1B", "1B", "2B", "2B", "3B", "3B", "SS", "SS", "LF", "CF", "RF", "LF", "RF"];
+const futuresHitters: BaseballPosition[] = ["C", "C", "C", "1B", "1B", "2B", "2B", "3B", "3B", "SS", "SS", "LF", "LF", "CF", "CF", "RF"];
+const pitcherRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
+const foreignCodes: NameCountryCode[] = ["US", "JP", "TW", "DO", "VE", "MX", "CA", "AU"];
 
-export const seedOrganizations = [
-  { id: "org_seoul", name: "Seoul Falcons", city: "Seoul" },
-  { id: "org_busan", name: "Busan Tides", city: "Busan" },
-  { id: "org_incheon", name: "Incheon Waves", city: "Incheon" },
-  { id: "org_daejeon", name: "Daejeon Sparks", city: "Daejeon" },
-] as const;
-
-const organizations = [
-  ...seedOrganizations,
-  { id: "org_suwon", name: "Suwon Shields", city: "Suwon" },
-  { id: "org_gwangju", name: "Gwangju Suns", city: "Gwangju" },
-] as const;
-
-const names = [
-  "한지완",
-  "서민준",
-  "강도하",
-  "윤태서",
-  "박이준",
-  "최리안",
-  "백선우",
-  "문해준",
-  "임건우",
-  "장율",
-  "오시안",
-  "신하루",
-  "고이안",
-  "남도윤",
-  "류태인",
-  "안지수",
-  "주현",
-  "하은호",
-  "차로한",
-  "손예준",
-  "김도윤",
-  "이서준",
-  "박하준",
-  "정민재",
-  "최강준",
-  "오준서",
-  "윤시후",
-  "임태오",
-  "문지호",
-  "권우진",
-  "홍유찬",
-  "배건",
-  "조하람",
-  "노시온",
-  "민준영",
-  "서지안",
-  "강라온",
-  "유하민",
-  "신이든",
-  "양도겸",
-  "백이현",
-  "전해솔",
-  "심건",
-  "차민율",
-  "고태겸",
-  "남윤재",
-  "류은재",
-  "안시우",
-  "주도현",
-  "하태윤",
-  "손다온",
-  "송재하",
-  "황이안",
-  "장유준",
-  "구연우",
-  "나온유",
-  "마준",
-  "방시윤",
-  "설지후",
-  "원라율",
-  "도현준",
-  "표유성",
-  "천지율",
-  "진하겸",
-  "허준휘",
-  "기서율",
-  "라건우",
-  "봉태린",
-  "여민성",
-  "추이준",
-  "탁선재",
-  "편이솔",
-  "도하진",
-  "곽윤호",
-  "문서율",
-  "연도진",
-  "차은결",
-  "한로운",
-  "서태건",
-  "김리우",
-  "이찬결",
-  "박도겸",
-  "정유건",
-  "최시안",
-  "오하율",
-  "윤재윤",
-  "임서호",
-  "문건율",
-  "권이준",
-  "홍준휘",
-  "배시온",
-  "조민율",
-  "노라온",
-  "민유준",
-  "서은호",
-  "강태서",
-  "유지완",
-  "신도하",
-  "양이준",
+export const seedOrganizations: SeedOrganizationConfig[] = [
+  { id: "org_seoul", name: "Seoul Falcons", city: "Seoul", tier: "CONTENDER" },
+  { id: "org_busan", name: "Busan Tides", city: "Busan", tier: "UPPER" },
+  { id: "org_incheon", name: "Incheon Waves", city: "Incheon", tier: "MID" },
+  { id: "org_daejeon", name: "Daejeon Sparks", city: "Daejeon", tier: "LOWER" },
+  { id: "org_suwon", name: "Suwon Shields", city: "Suwon", tier: "MID" },
+  { id: "org_gwangju", name: "Gwangju Suns", city: "Gwangju", tier: "REBUILDING" },
+  { id: "org_daegu", name: "Daegu Meteors", city: "Daegu", tier: "UPPER" },
+  { id: "org_ulsan", name: "Ulsan Anchors", city: "Ulsan", tier: "LOWER" },
+  { id: "org_jeonju", name: "Jeonju Royals", city: "Jeonju", tier: "CONTENDER" },
+  { id: "org_changwon", name: "Changwon Cannons", city: "Changwon", tier: "REBUILDING" },
 ];
 
+const smallOrganizations = seedOrganizations.slice(0, 4);
+
 export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
+  return createStandardSeedWorld(seed, options);
+}
+
+export function createSmallSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
+  return createWorld(seed, { ...options, preset: "SMALL" });
+}
+
+export function createStandardSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
+  return createWorld(seed, { ...options, preset: "STANDARD" });
+}
+
+function createWorld(seed: number, options: SeedWorldOptions): SeedWorldResult {
+  const preset = options.preset ?? "STANDARD";
+  const orgs = preset === "SMALL" ? smallOrganizations : seedOrganizations;
   const world = new LeagueWorld(new WorldClock("2027-04-03"), new Mulberry32Random(seed));
-  world.addCountry({ id: "country_kr", code: "KR", name: "Korea Republic" });
-  world.addCountry({ id: "country_pw", code: "PW", name: "Pacific West" });
-  world.addCountry({ id: "country_jp", code: "JP", name: "Japan Archipelago" });
+  addCountries(world);
+  addLeagues(world);
+  addOrganizationsAndTeams(world, orgs);
+  addInternationalJobMarkets(world);
+
+  const season = world.createSeason({
+    id: "season_2027",
+    leagueId: "league_kr1",
+    year: 2027,
+    name: "2027 Korea Premier League",
+    startDate: "2027-04-01",
+    regularSeasonEndDate: "2027-10-05",
+    postseasonEndDate: "2027-11-03",
+    status: "REGULAR_SEASON",
+    allowDraws: true,
+    hasPostseason: true,
+  });
+  const topTeamIds = orgs.map((org) => teamIdFor(org.id, "top"));
+  const competition = world.createCompetition({
+    id: "competition_regular_2027",
+    seasonId: season.id,
+    leagueId: season.leagueId,
+    name: "2027 Regular Season",
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: topTeamIds,
+  });
+
+  orgs.forEach((org, index) => {
+    seedOrganization(world, seed, org, preset);
+    seedManagersAndScouts(world, seed, org, index, options);
+  });
+
+  seedAmateurs(world, seed, preset, orgs);
+  seedFreeAgents(world, seed, preset, orgs);
+  seedInternationalScouts(world, seed);
+
+  world.generateRoundRobinSchedule({
+    seasonId: season.id,
+    competitionId: competition.id,
+    teamIds: topTeamIds,
+    gamesPerOpponent: preset === "SMALL" ? 2 : 4,
+    startDate: "2027-04-03",
+    restDaysBetweenRounds: 0,
+  });
+
+  const draft = world.createDraft({
+    id: "draft_2027",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: preset === "SMALL" ? 3 : 8,
+    draftOrder: [...orgs].reverse().map((org) => org.id),
+  });
+
+  seedManagerMarket(world);
+
+  let userManagerId = `mgr_${options.organizationId ?? "org_seoul"}`;
+  let userTeamId = teamIdFor(options.organizationId ?? "org_seoul", "top");
+  if (options.startMode === "UNEMPLOYED") {
+    userManagerId = "mgr_user";
+    userTeamId = "team_org_seoul_top";
+    const generated = generatePersonName((options.managerNationalityCode as NameCountryCode) ?? "KR", seed, "mgr_user", 0);
+    world.addManager({
+      id: userManagerId,
+      name: options.managerName ?? generated.name,
+      birthDate: "1984-03-01",
+      nationality: countryNameForCode(options.managerNationalityCode),
+      nationalityCode: options.managerNationalityCode ?? "KR",
+      status: "UNEMPLOYED",
+      reputation: 45,
+    });
+  }
+
+  return { world, userManagerId, userTeamId, seasonId: season.id, competitionId: competition.id, draftId: draft.id, seed, preset };
+}
+
+function addCountries(world: LeagueWorld): void {
+  const countryRows: Array<[EntityId, string, string]> = [
+    ["country_kr", "KR", "Korea Republic"],
+    ["country_us", "US", "United States"],
+    ["country_jp", "JP", "Japan Archipelago"],
+    ["country_tw", "TW", "Taiwan"],
+    ["country_do", "DO", "Dominican Republic"],
+    ["country_ve", "VE", "Venezuela"],
+    ["country_mx", "MX", "Mexico"],
+    ["country_ca", "CA", "Canada"],
+    ["country_au", "AU", "Australia"],
+    ["country_pw", "PW", "Pacific West"],
+  ];
+  const countries: Array<{ id: EntityId; code: string; name: string }> = countryRows.map(([id, code, name]) => ({ id, code, name }));
+  countries.forEach((country) => world.addCountry(country));
+}
+
+function addLeagues(world: LeagueWorld): void {
   world.addLeague({
     id: "league_kr1",
     countryId: "country_kr",
@@ -164,341 +195,235 @@ export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {})
     pitchingQualificationOuts: 18,
     gameRosterRules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
   });
-  world.addLeague({
-    id: "league_kr_futures",
-    countryId: "country_kr",
-    name: "Korea Futures League",
-    level: 2,
-    category: "PROFESSIONAL",
-    usesDH: true,
-  });
-  world.addLeague({
-    id: "league_pw1",
-    countryId: "country_pw",
-    name: "Pacific Global League",
-    level: 1,
-    category: "INTERNATIONAL",
-    usesDH: true,
-  });
-  world.addLeague({
-    id: "league_jp1",
-    countryId: "country_jp",
-    name: "Japan Frontier League",
-    level: 1,
-    category: "PROFESSIONAL",
-    usesDH: true,
-  });
+  world.addLeague({ id: "league_kr_futures", countryId: "country_kr", name: "Korea Futures League", level: 2, category: "PROFESSIONAL", usesDH: true });
+  world.addLeague({ id: "league_pw1", countryId: "country_pw", name: "Pacific Global League", level: 1, category: "INTERNATIONAL", usesDH: true });
+  world.addLeague({ id: "league_jp1", countryId: "country_jp", name: "Japan Frontier League", level: 1, category: "PROFESSIONAL", usesDH: true });
+}
 
-  for (const org of organizations) {
+function addOrganizationsAndTeams(world: LeagueWorld, orgs: SeedOrganizationConfig[]): void {
+  for (const org of orgs) {
     world.addOrganization({ id: org.id, name: `${org.name} Organization`, countryId: "country_kr" });
-    world.addTeam({
-      id: teamIdFor(org.id, "top"),
-      leagueId: "league_kr1",
-      organizationId: org.id,
-      name: org.name,
-      teamType: "CLUB",
-      rosterLevel: 1,
-      rosterLevelName: "1군",
-      isTopLevel: true,
-    });
-    world.addTeam({
-      id: teamIdFor(org.id, "futures"),
-      leagueId: "league_kr_futures",
-      organizationId: org.id,
-      name: `${org.name} Futures`,
-      teamType: "CLUB",
-      parentTeamId: teamIdFor(org.id, "top"),
-      rosterLevel: 2,
-      rosterLevelName: "퓨처스",
-    });
+    world.addTeam({ id: teamIdFor(org.id, "top"), leagueId: "league_kr1", organizationId: org.id, name: org.name, teamType: "CLUB", rosterLevel: 1, rosterLevelName: "1군", isTopLevel: true });
+    world.addTeam({ id: teamIdFor(org.id, "futures"), leagueId: "league_kr_futures", organizationId: org.id, name: `${org.name} Futures`, teamType: "CLUB", parentTeamId: teamIdFor(org.id, "top"), rosterLevel: 2, rosterLevelName: "퓨처스" });
   }
+}
+
+function addInternationalJobMarkets(world: LeagueWorld): void {
   world.addOrganization({ id: "org_harbor", name: "Harbor Voyagers Organization", countryId: "country_pw" });
-  world.addTeam({
-    id: "team_harbor",
-    leagueId: "league_pw1",
-    organizationId: "org_harbor",
-    name: "Harbor Voyagers",
-    teamType: "CLUB",
-    rosterLevel: 1,
-    rosterLevelName: "1군",
-    isTopLevel: true,
-  });
+  world.addTeam({ id: "team_harbor", leagueId: "league_pw1", organizationId: "org_harbor", name: "Harbor Voyagers", teamType: "CLUB", rosterLevel: 1, rosterLevelName: "1군", isTopLevel: true });
   world.addOrganization({ id: "org_osaka", name: "Osaka Suns Organization", countryId: "country_jp" });
-  world.addTeam({
-    id: "team_osaka",
-    leagueId: "league_jp1",
-    organizationId: "org_osaka",
-    name: "Osaka Suns",
-    teamType: "CLUB",
-    rosterLevel: 1,
-    rosterLevelName: "1군",
-    isTopLevel: true,
-  });
-
-  const season = world.createSeason({
-    id: "season_2027",
-    leagueId: "league_kr1",
-    year: 2027,
-    name: "2027 Korea Premier League",
-    startDate: "2027-04-01",
-    regularSeasonEndDate: "2027-10-05",
-    postseasonEndDate: "2027-11-03",
-    status: "REGULAR_SEASON",
-    allowDraws: true,
-    hasPostseason: true,
-  });
-  const competition = world.createCompetition({
-    id: "competition_regular_2027",
-    seasonId: season.id,
-    leagueId: season.leagueId,
-    name: "2027 Regular Season",
-    type: "REGULAR_SEASON",
-    startDate: season.startDate,
-    endDate: season.regularSeasonEndDate,
-    participatingTeamIds: organizations.map((org) => teamIdFor(org.id, "top")),
-  });
-
-  for (const org of organizations) {
-    seedOrganization(world, seed, org.id);
-    const isUserManager = org.id === (options.organizationId ?? "org_seoul") && options.startMode !== "UNEMPLOYED";
-    world.addManager({
-      id: `mgr_${org.id}`,
-      name: isUserManager ? (options.managerName ?? `${org.city} Manager`) : `${org.city} Manager`,
-      birthDate: "1979-02-10",
-      nationality: countryNameForCode(isUserManager ? options.managerNationalityCode : "KR"),
-      nationalityCode: isUserManager ? (options.managerNationalityCode ?? "KR") : "KR",
-      status: "EMPLOYED",
-      reputation: org.id === "org_seoul" ? 72 : 58,
-      currentTeamId: teamIdFor(org.id, "top"),
-      contracts: [{
-        id: `mgr_contract_${org.id}_2027`,
-        managerId: `mgr_${org.id}`,
-        organizationId: org.id,
-        teamId: teamIdFor(org.id, "top"),
-        role: "MANAGER",
-        startDate: "2027-01-01",
-        endDate: org.id === "org_seoul" ? "2029-12-31" : "2028-12-31",
-        salary: org.id === "org_seoul" ? 900000 : 620000,
-        currency: "USD",
-        status: "ACTIVE",
-      }],
-    });
-    world.addScout({
-      id: `scout_${org.id}`,
-      name: `${org.city} Area Scout`,
-      organizationId: org.id,
-      abilityEvaluation: 62 + org.city.length,
-      potentialEvaluation: 67 + org.city.length,
-      regionalKnowledge: 75,
-      experience: 58,
-    });
-  }
-
-  seedProspects(world);
-  seedFreeAgents(world);
-
-  world.generateRoundRobinSchedule({
-    seasonId: season.id,
-    competitionId: competition.id,
-    teamIds: organizations.map((org) => teamIdFor(org.id, "top")),
-    gamesPerOpponent: 2,
-    startDate: "2027-04-03",
-    restDaysBetweenRounds: 0,
-  });
-
-  const draft = world.createDraft({
-    id: "draft_2027",
-    leagueId: "league_kr1",
-    seasonId: season.id,
-    year: 2027,
-    rounds: 3,
-    draftOrder: ["org_gwangju", "org_daejeon", "org_suwon", "org_incheon", "org_busan", "org_seoul"],
-  });
-
-  world.openManagerJobVacancy({
-    id: "vacancy_harbor_2027",
-    organizationId: "org_harbor",
-    teamId: "team_harbor",
-    minimumReputation: 45,
-    preferredReputation: 68,
-    salaryRange: { min: 550000, max: 1250000, currency: "USD" },
-    contractYearsRange: { min: 2, max: 4 },
-    expectations: "국제 리그 포스트시즌 경쟁",
-  });
-  world.openManagerJobVacancy({
-    id: "vacancy_osaka_2027",
-    organizationId: "org_osaka",
-    teamId: "team_osaka",
-    minimumReputation: 55,
-    preferredReputation: 72,
-    salaryRange: { min: 70000000, max: 190000000, currency: "JPY" },
-    contractYearsRange: { min: 2, max: 3 },
-    expectations: "젊은 선수 육성과 상위권 도약",
-  });
-  world.makeManagerOffer({
-    id: "manager_offer_osaka_2027",
-    vacancyId: "vacancy_osaka_2027",
-    managerId: "mgr_org_seoul",
-    organizationId: "org_osaka",
-    teamId: "team_osaka",
-    salary: 145000000,
-    currency: "JPY",
-    years: 3,
-    startDate: "2027-04-04",
-    endDate: "2029-12-31",
-    expectations: "3년 안에 우승권 진입",
-    reason: "해외 구단 감독 제안",
-  });
-
-  let userManagerId = `mgr_${options.organizationId ?? "org_seoul"}`;
-  let userTeamId = teamIdFor(options.organizationId ?? "org_seoul", "top");
-  if (options.startMode === "UNEMPLOYED") {
-    userManagerId = "mgr_user";
-    userTeamId = "team_org_seoul_top";
-    world.addManager({
-      id: userManagerId,
-      name: options.managerName ?? "새 감독",
-      birthDate: "1984-03-01",
-      nationality: countryNameForCode(options.managerNationalityCode),
-      nationalityCode: options.managerNationalityCode ?? "KR",
-      status: "UNEMPLOYED",
-      reputation: 45,
-    });
-  }
-
-  return {
-    world,
-    userManagerId,
-    userTeamId,
-    seasonId: season.id,
-    competitionId: competition.id,
-    draftId: draft.id,
-    seed,
-  };
+  world.addTeam({ id: "team_osaka", leagueId: "league_jp1", organizationId: "org_osaka", name: "Osaka Suns", teamType: "CLUB", rosterLevel: 1, rosterLevelName: "1군", isTopLevel: true });
 }
 
-function countryNameForCode(code = "KR"): string {
-  if (code === "JP") return "일본";
-  if (code === "PW") return "퍼시픽 웨스트";
-  return "대한민국";
-}
-
-function seedOrganization(world: LeagueWorld, seed: number, organizationId: EntityId): void {
-  const topTeamId = teamIdFor(organizationId, "top");
-  const futuresTeamId = teamIdFor(organizationId, "futures");
+function seedOrganization(world: LeagueWorld, seed: number, org: SeedOrganizationConfig, preset: SeedWorldPreset): void {
+  const topTeamId = teamIdFor(org.id, "top");
+  const futuresTeamId = teamIdFor(org.id, "futures");
   const topPlayers: EntityId[] = [];
-  const futuresPlayers: EntityId[] = [];
-  const hitterPositions: BaseballPosition[] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "C", "IF" as BaseballPosition, "OF" as BaseballPosition, "1B", "SS"];
-  hitterPositions.forEach((position, index) => {
-    const id = `${organizationId}_bat_${index + 1}`;
-    const primaryPosition = position === ("IF" as BaseballPosition) ? firstLevelPositions[(index + 1) % 5]! : position === ("OF" as BaseballPosition) ? firstLevelPositions[5 + (index % 3)]! : position;
-    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + seed), primaryPosition, {
-      currentAbility: 42 + (index % 9) * 3,
-      potentialAbility: 55 + (index % 10) * 3,
-      birthDate: `${1997 + (index % 10)}-05-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
+  const orgIndex = seedOrganizations.findIndex((item) => item.id === org.id);
+  const topPitcherCount = preset === "SMALL" ? 6 : 13;
+  const futuresPitcherCount = preset === "SMALL" ? 8 : 16;
+  const topHitterPool = preset === "SMALL" ? topHitters.slice(0, 9) : topHitters;
+  const futuresHitterPool = preset === "SMALL" ? futuresHitters.slice(0, 12) : futuresHitters;
+  const strength = tierStrength(org.tier, seed, orgIndex);
+
+  topHitterPool.forEach((position, index) => {
+    const id = `${org.id}_bat_${index + 1}`;
+    const nationalityCode = foreignSlot(index, orgIndex) ? foreignCodes[(index + orgIndex) % foreignCodes.length]! : "KR";
+    const ca = clamp(38 + strength + ((index * 7 + orgIndex) % 18), 25, 86);
+    world.addPlayer(makePlayer(id, generatedName(nationalityCode, seed, org.id, index).name, position, {
+      nationality: countryNameForCode(nationalityCode),
+      nationalityCode,
+      currentAbility: ca,
+      potentialAbility: clamp(ca + 8 + ((index + orgIndex) % 17), 35, 96),
+      birthDate: `${1994 + ((index + orgIndex) % 12)}-05-${day(index)}` as ISODate,
     }));
-    signAndAssign(world, id, organizationId, topTeamId, 360000 + index * 45000);
+    signAndAssign(world, id, org.id, topTeamId, salaryFor(ca, index, strength), index);
     topPlayers.push(id);
   });
-  for (let index = 0; index < 12; index += 1) {
-    const id = `${organizationId}_pit_${index + 1}`;
-    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + 31 + seed), "P", {
-      currentAbility: 41 + (index % 8) * 4,
-      potentialAbility: 56 + (index % 9) * 3,
-      birthDate: `${1994 + (index % 11)}-03-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
+
+  for (let index = 0; index < topPitcherCount; index += 1) {
+    const id = `${org.id}_pit_${index + 1}`;
+    const nationalityCode = foreignSlot(index + 3, orgIndex) ? foreignCodes[(index + orgIndex + 2) % foreignCodes.length]! : "KR";
+    const ca = clamp(40 + strength + ((index * 5 + orgIndex) % 20), 25, 88);
+    world.addPlayer(makePlayer(id, generatedName(nationalityCode, seed, org.id, index + 30).name, "P", {
+      nationality: countryNameForCode(nationalityCode),
+      nationalityCode,
+      currentAbility: ca,
+      potentialAbility: clamp(ca + 7 + ((index + orgIndex) % 16), 35, 96),
+      birthDate: `${1992 + ((index + orgIndex) % 13)}-03-${day(index)}` as ISODate,
     }));
-    signAndAssign(world, id, organizationId, topTeamId, 420000 + index * 52000);
+    signAndAssign(world, id, org.id, topTeamId, salaryFor(ca, index + 20, strength), index + 20);
     topPlayers.push(id);
   }
-  for (let index = 0; index < 20; index += 1) {
-    const position = index < 8 ? "P" : firstLevelPositions[(index + 2) % firstLevelPositions.length]!;
-    const id = `${organizationId}_fut_${index + 1}`;
-    world.addPlayer(makePlayer(id, uniqueName(organizationId, index + 59 + seed), position, {
-      currentAbility: 30 + (index % 10) * 2,
-      potentialAbility: 52 + (index % 12) * 3,
-      birthDate: `${2003 + (index % 7)}-07-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
+
+  futuresHitterPool.forEach((position, index) => {
+    const id = `${org.id}_fut_bat_${index + 1}`;
+    const ca = clamp(27 + Math.floor(strength / 2) + ((index * 3 + orgIndex) % 17), 20, 66);
+    world.addPlayer(makePlayer(id, generatedName("KR", seed, org.id, index + 70).name, position, {
+      currentAbility: ca,
+      potentialAbility: clamp(ca + 16 + ((index + orgIndex) % 22), 40, 94),
+      birthDate: `${2002 + ((index + orgIndex) % 8)}-07-${day(index)}` as ISODate,
     }));
-    signAndAssign(world, id, organizationId, futuresTeamId, 180000 + index * 12000);
-    futuresPlayers.push(id);
+    signAndAssign(world, id, org.id, futuresTeamId, salaryFor(ca, index + 50, 0), index + 50);
+  });
+
+  for (let index = 0; index < futuresPitcherCount; index += 1) {
+    const id = `${org.id}_fut_pit_${index + 1}`;
+    const ca = clamp(28 + Math.floor(strength / 2) + ((index * 4 + orgIndex) % 17), 20, 68);
+    world.addPlayer(makePlayer(id, generatedName("KR", seed, org.id, index + 100).name, "P", {
+      currentAbility: ca,
+      potentialAbility: clamp(ca + 15 + ((index + orgIndex) % 24), 40, 95),
+      birthDate: `${2001 + ((index + orgIndex) % 9)}-09-${day(index)}` as ISODate,
+    }));
+    signAndAssign(world, id, org.id, futuresTeamId, salaryFor(ca, index + 80, 0), index + 80);
   }
+
   world.setPitchingRotation(topTeamId, topPlayers.filter((id) => id.includes("_pit_")).slice(0, 5));
   topPlayers.filter((id) => id.includes("_pit_")).slice(1).forEach((playerId, index) => {
     world.assignBullpenRole(topTeamId, playerId, [pitcherRoles[index % pitcherRoles.length]!]);
   });
-  void futuresPlayers;
 }
 
-function seedProspects(world: LeagueWorld): void {
-  for (let index = 0; index < 72; index += 1) {
-    const position = index % 5 === 0 ? "P" : firstLevelPositions[index % firstLevelPositions.length]!;
-    const id = `prospect_${index + 1}`;
-    world.addPlayer(makePlayer(id, uniqueName("prospect", index + 101), position, {
-      status: index % 4 === 0 ? "STUDENT" : "AMATEUR",
-      currentAbility: 28 + (index % 8) * 3,
-      potentialAbility: 58 + (index % 7) * 5,
-      trueCurrentAbility: 28 + (index % 8) * 3,
-      truePotentialAbility: 58 + (index % 7) * 5,
-      birthDate: `${2008 + (index % 3)}-09-1${index % 9}` as ISODate,
-    }));
-    const eligibility = world.evaluateDraftEligibility(id, "league_kr1", 2027);
-    if (eligibility.eligible) {
-      const player = world.players.get(id);
-      if (player) {
-        player.draftEligibility = {
+function seedManagersAndScouts(world: LeagueWorld, seed: number, org: SeedOrganizationConfig, index: number, options: SeedWorldOptions): void {
+  const isUserManager = org.id === (options.organizationId ?? "org_seoul") && options.startMode !== "UNEMPLOYED";
+  const managerCode = isUserManager ? ((options.managerNationalityCode as NameCountryCode) ?? "KR") : managerCountry(index);
+  const managerGenerated = generatedName(managerCode, seed, org.id, 500 + index);
+  const reputation = clamp(52 + tierStrength(org.tier, seed, index) + (index % 9), 35, 88);
+  world.addManager({
+    id: `mgr_${org.id}`,
+    name: isUserManager ? (options.managerName ?? managerGenerated.name) : managerGenerated.name,
+    birthDate: `${1969 + (index % 18)}-02-${day(index)}` as ISODate,
+    nationality: countryNameForCode(managerCode),
+    nationalityCode: managerCode,
+    status: "EMPLOYED",
+    reputation,
+    currentTeamId: teamIdFor(org.id, "top"),
+    contracts: [{
+      id: `mgr_contract_${org.id}_2027`,
+      managerId: `mgr_${org.id}`,
+      organizationId: org.id,
+      teamId: teamIdFor(org.id, "top"),
+      role: "MANAGER",
+      startDate: "2027-01-01",
+      endDate: `${2028 + (index % 3)}-12-31`,
+      salary: managerCode === "KR" ? 520000000 + reputation * 5000000 : 650000 + reputation * 12000,
+      currency: managerCode === "KR" ? "KRW" : "USD",
+      status: "ACTIVE",
+    }],
+  });
+
+  for (let scoutIndex = 0; scoutIndex < 3; scoutIndex += 1) {
+    const code = scoutIndex === 0 ? "KR" : foreignCodes[(index + scoutIndex) % foreignCodes.length]!;
+    const generated = generatedName(code, seed, org.id, 620 + scoutIndex);
+    world.addScout({
+      id: `scout_${org.id}_${scoutIndex + 1}`,
+      name: generated.name,
+      organizationId: org.id,
+      abilityEvaluation: clamp(48 + ((index * 9 + scoutIndex * 13) % 42), 35, 92),
+      potentialEvaluation: clamp(50 + ((index * 11 + scoutIndex * 7) % 43), 35, 94),
+      regionalKnowledge: clamp(54 + ((index * 5 + scoutIndex * 17) % 41), 30, 96),
+      experience: clamp(40 + ((index * 13 + scoutIndex * 9) % 50), 20, 95),
+    });
+  }
+}
+
+function seedInternationalScouts(world: LeagueWorld, seed: number): void {
+  [
+    { orgId: "org_harbor", teamId: "team_harbor", code: "US" as NameCountryCode, salary: 900000, currency: "USD" },
+    { orgId: "org_osaka", teamId: "team_osaka", code: "JP" as NameCountryCode, salary: 145000000, currency: "JPY" },
+  ].forEach((item, index) => {
+    const scout = generatedName(item.code, seed, item.orgId, 710);
+    world.addScout({ id: `scout_${item.orgId}_1`, name: scout.name, organizationId: item.orgId, abilityEvaluation: 68, potentialEvaluation: 72, regionalKnowledge: 78, experience: 70 });
+  });
+}
+
+function seedAmateurs(world: LeagueWorld, seed: number, preset: SeedWorldPreset, orgs: SeedOrganizationConfig[]): void {
+  const stages: AmateurStageConfig[] = preset === "SMALL"
+    ? [
+        { key: "MIDDLE_SCHOOL", label: "중학교", count: 10, status: "STUDENT", birthYearStart: 2011, birthYearSpan: 2 },
+        { key: "HIGH_SCHOOL", label: "고등학교", count: 28, status: "STUDENT", birthYearStart: 2008, birthYearSpan: 3 },
+        { key: "COLLEGE", label: "대학", count: 22, status: "AMATEUR", birthYearStart: 2004, birthYearSpan: 4 },
+        { key: "INDEPENDENT", label: "독립/기타", count: 12, status: "INDEPENDENT", birthYearStart: 1998, birthYearSpan: 8 },
+      ]
+    : [
+        { key: "MIDDLE_SCHOOL", label: "중학교", count: 50, status: "STUDENT", birthYearStart: 2011, birthYearSpan: 2 },
+        { key: "HIGH_SCHOOL", label: "고등학교", count: 90, status: "STUDENT", birthYearStart: 2008, birthYearSpan: 3 },
+        { key: "COLLEGE", label: "대학", count: 70, status: "AMATEUR", birthYearStart: 2004, birthYearSpan: 4 },
+        { key: "INDEPENDENT", label: "독립/기타", count: 40, status: "INDEPENDENT", birthYearStart: 1997, birthYearSpan: 9 },
+      ];
+
+  for (const stage of stages) {
+    for (let index = 0; index < stage.count; index += 1) {
+      const id = `amateur_${stage.key.toLowerCase()}_${index + 1}`;
+      const position = index % 4 === 0 ? "P" : firstLevelPositions[(index + 1) % firstLevelPositions.length]!;
+      const ca = stage.key === "MIDDLE_SCHOOL" ? 18 + (index % 15) : stage.key === "HIGH_SCHOOL" ? 25 + (index % 20) : stage.key === "COLLEGE" ? 31 + (index % 24) : 28 + (index % 26);
+      const player = makePlayer(id, generatedName("KR", seed, stage.key, index).name, position, {
+        status: stage.status,
+        currentAbility: ca,
+        potentialAbility: clamp(ca + 18 + ((index * 7) % 28), 35, 96),
+        birthDate: `${stage.birthYearStart + (index % stage.birthYearSpan)}-09-${day(index)}` as ISODate,
+      });
+      player.careerEntries.push({ id: `career_${id}_stage`, personId: id, personType: "PLAYER", organizationNameSnapshot: stage.label, role: stage.label, status: player.status, startDate: "2027-03-01", reason: `${stage.label} 선수` });
+      world.addPlayer(player);
+      const eligibility = world.evaluateDraftEligibility(id, "league_kr1", 2027);
+      const shouldDeclare = stage.key !== "MIDDLE_SCHOOL" && ((index + seed) % (stage.key === "HIGH_SCHOOL" ? 3 : 2) === 0);
+      const saved = world.players.get(id);
+      if (saved) {
+        saved.draftEligibility = {
           ...eligibility,
-          declared: true,
-          status: "DECLARED",
-          decision: "DECLARE",
-          reason: "개발 시드 드래프트 참가 선언",
+          declared: eligibility.eligible && shouldDeclare,
+          status: eligibility.eligible && shouldDeclare ? "DECLARED" : eligibility.status,
+          decision: eligibility.eligible && shouldDeclare ? "DECLARE" : (stage.key === "INDEPENDENT" ? "INDEPENDENT" : "STAY_SCHOOL"),
+          reason: shouldDeclare ? `${stage.label} 드래프트 참가 선언` : `${stage.label} 잔류/대기`,
         };
       }
-    }
-    for (const org of organizations) {
-      world.createScoutingReport(`scout_${org.id}`, id);
+      const primaryScoutingOrg = orgs[0];
+      if (primaryScoutingOrg) {
+        world.createScoutingReport(`scout_${primaryScoutingOrg.id}_1`, id);
+      }
+      const rotatingScoutingOrg = orgs[(index + stage.key.length) % orgs.length];
+      if (rotatingScoutingOrg && rotatingScoutingOrg.id !== primaryScoutingOrg?.id && index % 5 === 0) {
+        world.createScoutingReport(`scout_${rotatingScoutingOrg.id}_1`, id);
+      }
     }
   }
 }
 
-function seedFreeAgents(world: LeagueWorld): void {
-  for (let index = 0; index < 18; index += 1) {
+function seedFreeAgents(world: LeagueWorld, seed: number, preset: SeedWorldPreset, orgs: SeedOrganizationConfig[]): void {
+  const count = preset === "SMALL" ? 18 : 40;
+  for (let index = 0; index < count; index += 1) {
     const id = `free_agent_${index + 1}`;
-    world.addPlayer(makePlayer(id, uniqueName("free_agent", index + 211), index % 4 === 0 ? "P" : firstLevelPositions[index % firstLevelPositions.length]!, {
+    const nationalityCode = index % 5 === 0 ? foreignCodes[index % foreignCodes.length]! : "KR";
+    const position = index % 4 === 0 ? "P" : firstLevelPositions[index % firstLevelPositions.length]!;
+    const profile = index % 5;
+    const ca = [64, 48, 56, 37, 43][profile]! + (index % 7);
+    world.addPlayer(makePlayer(id, generatedName(nationalityCode, seed, "free_agent", index).name, position, {
       status: "FREE_AGENT",
-      currentAbility: 38 + (index % 9) * 4,
-      potentialAbility: 46 + (index % 10) * 4,
-      birthDate: `${1992 + (index % 12)}-01-${String((index % 27) + 1).padStart(2, "0")}` as ISODate,
-      freeAgentStatus: {
-        eligible: true,
-        becameFreeAgentOn: "2027-03-20",
-        previousOrganizationId: index % 2 === 0 ? "org_busan" : "org_incheon",
-        type: "RELEASED",
-      },
+      nationality: countryNameForCode(nationalityCode),
+      nationalityCode,
+      currentAbility: ca,
+      potentialAbility: clamp(ca + [5, 7, 2, 13, 20][profile]!, 35, 88),
+      birthDate: `${profile === 4 ? 2002 : 1989 + ((index + profile) % 15)}-01-${day(index)}` as ISODate,
+      freeAgentStatus: { eligible: true, becameFreeAgentOn: "2027-03-20", previousOrganizationId: orgs[index % orgs.length]!.id, type: profile === 3 ? "RELEASED" : "CONTRACT_EXPIRED" },
       contractDemand: {
-        desiredSalary: 450000 + index * 120000,
-        desiredYears: index < 2 ? 2 : 1,
-        minimumSalary: 250000 + index * 70000,
+        desiredSalary: 180000 + ca * 17000 + profile * 45000,
+        desiredYears: [2, 1, 1, 1, 3][profile]!,
+        minimumSalary: 90000 + ca * 9000,
         minimumYears: 1,
-        preferredRole: index === 0 ? "P" : firstLevelPositions[index]!,
+        preferredRole: position,
         preferredCountryIds: ["country_kr"],
       },
     }));
   }
 }
 
-function uniqueName(scope: EntityId, index: number): string {
-  const scopeOffset = [...scope].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const resolvedIndex = Math.abs(index + scopeOffset);
-  const base = names[resolvedIndex % names.length] ?? `선수 ${index}`;
-  const number = Math.floor(resolvedIndex / names.length) + 1;
-  return `${base}${number > 1 ? ` ${number}` : ""}`;
+function seedManagerMarket(world: LeagueWorld): void {
+  world.openManagerJobVacancy({ id: "vacancy_harbor_2027", organizationId: "org_harbor", teamId: "team_harbor", minimumReputation: 45, preferredReputation: 68, salaryRange: { min: 550000, max: 1250000, currency: "USD" }, contractYearsRange: { min: 2, max: 4 }, expectations: "국제 리그 포스트시즌 경쟁" });
+  world.openManagerJobVacancy({ id: "vacancy_osaka_2027", organizationId: "org_osaka", teamId: "team_osaka", minimumReputation: 55, preferredReputation: 72, salaryRange: { min: 70000000, max: 190000000, currency: "JPY" }, contractYearsRange: { min: 2, max: 3 }, expectations: "젊은 선수 육성과 상위권 도약" });
+  world.makeManagerOffer({ id: "manager_offer_osaka_2027", vacancyId: "vacancy_osaka_2027", managerId: "mgr_org_seoul", organizationId: "org_osaka", teamId: "team_osaka", salary: 145000000, currency: "JPY", years: 3, startDate: "2027-04-04", endDate: "2029-12-31", expectations: "3년 안에 우승권 진입", reason: "해외 구단 감독 제안" });
 }
 
-function makePlayer(
-  id: EntityId,
-  name: string,
-  position: BaseballPosition,
-  overrides: Partial<Player> = {},
-): Player {
+function makePlayer(id: EntityId, name: string, position: BaseballPosition, overrides: Partial<Player> = {}): Player {
   const currentAbility = overrides.currentAbility ?? 45;
   const potentialAbility = overrides.potentialAbility ?? Math.min(95, currentAbility + 18);
   const isPitcher = position === "P";
@@ -506,11 +431,11 @@ function makePlayer(
     id,
     name,
     birthDate: overrides.birthDate ?? "2002-04-01",
-    age: overrides.age ?? 25,
+    age: overrides.age ?? 2027 - Number((overrides.birthDate ?? "2002-04-01").slice(0, 4)),
     nationality: overrides.nationality ?? "대한민국",
     nationalityCode: overrides.nationalityCode ?? "KR",
-    bats: overrides.bats ?? "R",
-    throws: overrides.throws ?? "R",
+    bats: overrides.bats ?? (id.length % 5 === 0 ? "S" : id.length % 2 === 0 ? "L" : "R"),
+    throws: overrides.throws ?? (isPitcher && id.length % 3 === 0 ? "L" : "R"),
     primaryPosition: position,
     secondaryPositions: overrides.secondaryPositions ?? (isPitcher ? [] : ["DH"]),
     status: overrides.status ?? "AMATEUR",
@@ -518,29 +443,9 @@ function makePlayer(
     truePotentialAbility: overrides.truePotentialAbility ?? potentialAbility,
     currentAbility,
     potentialAbility,
-    battingRatings: overrides.battingRatings ?? {
-      contact: isPitcher ? 18 : currentAbility + 4,
-      power: isPitcher ? 16 : currentAbility,
-      plateDiscipline: isPitcher ? 18 : currentAbility - 2,
-      speed: isPitcher ? 28 : currentAbility,
-      fielding: isPitcher ? 38 : currentAbility + 1,
-      arm: isPitcher ? 58 : currentAbility + 2,
-    },
-    pitchingRatings: overrides.pitchingRatings ?? {
-      velocity: isPitcher ? currentAbility + 10 : 20,
-      control: isPitcher ? currentAbility + 2 : 20,
-      movement: isPitcher ? currentAbility + 4 : 20,
-      stamina: isPitcher ? currentAbility + 5 : 25,
-      pitchQuality: isPitcher ? currentAbility + 3 : 20,
-      repertoire: [{ name: "Fastball", quality: isPitcher ? currentAbility + 3 : 20 }],
-    },
-    developmentProfile: overrides.developmentProfile ?? {
-      developmentRate: 55,
-      consistency: 60,
-      durability: 66,
-      peakAgeRange: { start: 24, end: 30 },
-      declineRate: 42,
-    },
+    battingRatings: overrides.battingRatings ?? { contact: isPitcher ? 18 : currentAbility + 4, power: isPitcher ? 16 : currentAbility, plateDiscipline: isPitcher ? 18 : currentAbility - 2, speed: isPitcher ? 28 : currentAbility, fielding: isPitcher ? 38 : currentAbility + 1, arm: isPitcher ? 58 : currentAbility + 2 },
+    pitchingRatings: overrides.pitchingRatings ?? { velocity: isPitcher ? currentAbility + 10 : 20, control: isPitcher ? currentAbility + 2 : 20, movement: isPitcher ? currentAbility + 4 : 20, stamina: isPitcher ? currentAbility + 5 : 25, pitchQuality: isPitcher ? currentAbility + 3 : 20, repertoire: [{ name: "Fastball", quality: isPitcher ? currentAbility + 3 : 20 }] },
+    developmentProfile: overrides.developmentProfile ?? { developmentRate: clamp(45 + (id.length % 35), 20, 90), consistency: clamp(45 + (id.length % 30), 20, 90), durability: clamp(48 + (id.length % 33), 20, 92), peakAgeRange: { start: 24 + (id.length % 4), end: 30 + (id.length % 5) }, declineRate: clamp(34 + (id.length % 38), 15, 85) },
     injury: overrides.injury ?? { status: "HEALTHY" },
     gameCondition: overrides.gameCondition ?? { fatigue: 0, readiness: 100, availableForGame: true },
     rosterAssignments: overrides.rosterAssignments ?? [],
@@ -552,25 +457,42 @@ function makePlayer(
   };
 }
 
-function signAndAssign(
-  world: LeagueWorld,
-  playerId: EntityId,
-  organizationId: EntityId,
-  teamId: EntityId,
-  salary: number,
-): void {
-  world.registerContract({
-    playerId,
-    organizationId,
-    startDate: "2027-01-01",
-    endDate: "2029-12-31",
-    salary,
-    currency: "USD",
-    contractStatus: "ACTIVE",
-  });
+function signAndAssign(world: LeagueWorld, playerId: EntityId, organizationId: EntityId, teamId: EntityId, salary: number, index: number): void {
+  const startYear = index % 5 === 0 ? 2026 : 2027;
+  const endYear = index % 7 === 0 ? 2027 : 2027 + (index % 4);
+  world.registerContract({ playerId, organizationId, startDate: `${startYear}-01-01`, endDate: `${endYear}-12-31`, salary, currency: "KRW", ...(index % 6 === 0 ? { signingBonus: Math.floor(salary * 0.2) } : {}), contractStatus: "ACTIVE" });
   world.assignPlayerToRoster(playerId, teamId, "ACTIVE", "시드 로스터 배정");
+}
+
+function generatedName(code: NameCountryCode, seed: number, scope: EntityId, index: number) {
+  return generatePersonName(code, seed, scope, index);
 }
 
 function teamIdFor(organizationId: EntityId, level: "top" | "futures"): EntityId {
   return `team_${organizationId}_${level}`;
+}
+
+function tierStrength(tier: SeedOrganizationConfig["tier"], seed: number, index: number): number {
+  const base = { CONTENDER: 13, UPPER: 8, MID: 3, LOWER: -2, REBUILDING: -6 }[tier];
+  return base + (((seed + index * 17) % 7) - 3);
+}
+
+function salaryFor(currentAbility: number, index: number, strength: number): number {
+  return Math.max(32000000, Math.floor((40000000 + currentAbility * 8500000 + index * 1750000 + strength * 9000000) / 10000) * 10000);
+}
+
+function foreignSlot(index: number, orgIndex: number): boolean {
+  return (index + orgIndex) % 11 === 0 || (index + orgIndex) % 17 === 0;
+}
+
+function managerCountry(index: number): NameCountryCode {
+  return index % 8 === 0 ? "JP" : index % 9 === 0 ? "US" : "KR";
+}
+
+function day(index: number): string {
+  return String((index % 27) + 1).padStart(2, "0");
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

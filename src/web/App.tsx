@@ -1,14 +1,12 @@
 import { type ChangeEvent, useMemo, useState } from "react";
 import {
   Activity,
-  BarChart3,
   CalendarDays,
   ChevronsUpDown,
   ClipboardCheck,
   Clock3,
   FileJson,
   Handshake,
-  Home,
   ListChecks,
   Play,
   RefreshCcw,
@@ -16,9 +14,9 @@ import {
   Shield,
   Sparkles,
   UserRound,
-  UsersRound,
 } from "lucide-react";
 import { createSeedWorld, type SeedWorldResult } from "./seedWorld.js";
+import { managerTabs, navIcon, pages, type ManagerTab, type Page } from "./navigation.js";
 import {
   createWebSave,
   deleteLocalSave,
@@ -60,32 +58,7 @@ import type {
   WorldEvent,
 } from "../index.js";
 
-type Page =
-  | "HOME"
-  | "MANAGER"
-  | "GAMES"
-  | "STANDINGS"
-  | "ROSTER"
-  | "TEAMS"
-  | "PLAYERS"
-  | "PROSPECTS"
-  | "SCOUTING"
-  | "DRAFT"
-  | "MARKET"
-  | "RECORDS"
-  | "EVENTS"
-  | "SAVES";
-
-const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "ROSTER", "TEAMS", "PLAYERS", "PROSPECTS", "SCOUTING", "DRAFT", "MARKET", "RECORDS", "EVENTS", "SAVES"];
 const bullpenRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
-type ManagerTab = "OVERVIEW" | "ROSTER" | "CAREER" | "JOBS" | "OFFERS";
-const managerTabs: Record<ManagerTab, string> = {
-  OVERVIEW: "개요",
-  ROSTER: "선수단",
-  CAREER: "커리어",
-  JOBS: "구직",
-  OFFERS: "제안",
-};
 
 export function App() {
   const [seed, setSeed] = useState(20270403);
@@ -391,7 +364,7 @@ function StartScreen({
           <label className="form-field">국적<select value={careerNationality} onChange={(event) => setCareerNationality(event.target.value)}><option value="KR">대한민국</option><option value="JP">일본</option><option value="PW">퍼시픽 웨스트</option></select></label>
           <label className="form-field">시드<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
           <label className="form-field">시작 방식<select value={careerStartMode} onChange={(event) => setCareerStartMode(event.target.value as "CLUB" | "UNEMPLOYED")}><option value="CLUB">구단 선택</option><option value="UNEMPLOYED">무직</option></select></label>
-          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option><option value="org_suwon">수원 실즈</option><option value="org_gwangju">광주 선즈</option></select></label>
+          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option><option value="org_suwon">수원 실즈</option><option value="org_gwangju">광주 선즈</option><option value="org_daegu">대구 메테오스</option><option value="org_ulsan">울산 앵커스</option><option value="org_jeonju">전주 로열스</option><option value="org_changwon">창원 캐넌스</option></select></label>
         </Panel>
         <Panel title="저장 슬롯">
           <SaveSlotList metas={saveMetas} onLoad={onLoadSlot} />
@@ -866,16 +839,61 @@ function PlayersPage({
   selectedPlayer: Player | undefined;
   setSelectedPlayerId: (id: EntityId) => void;
 }) {
-  const filtered = data.players.filter((player) => {
-    const value = `${player.name} ${player.primaryPosition} ${player.status} ${teamName(world, player.currentTeamId)}`.toLowerCase();
-    return value.includes(query.toLowerCase());
-  });
+  const [teamFilter, setTeamFilter] = useState("ALL");
+  const [positionFilter, setPositionFilter] = useState("ALL");
+  const [nationalityFilter, setNationalityFilter] = useState("ALL");
+  const [ageFilter, setAgeFilter] = useState("ALL");
+  const [rosterFilter, setRosterFilter] = useState("ALL");
+  const [sortKey, setSortKey] = useState("NAME");
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageSize = 50;
+  const filtered = data.players
+    .filter((player) => {
+      const value = `${player.name} ${player.primaryPosition} ${player.status} ${teamName(world, player.currentTeamId)}`.toLowerCase();
+      if (!value.includes(query.toLowerCase())) return false;
+      if (teamFilter !== "ALL" && player.currentTeamId !== teamFilter) return false;
+      if (positionFilter !== "ALL" && player.primaryPosition !== positionFilter) return false;
+      if (nationalityFilter !== "ALL" && player.nationalityCode !== nationalityFilter) return false;
+      if (rosterFilter !== "ALL" && (player.rosterStatus ?? player.status) !== rosterFilter) return false;
+      if (ageFilter === "U20" && player.age >= 20) return false;
+      if (ageFilter === "20S" && (player.age < 20 || player.age >= 30)) return false;
+      if (ageFilter === "30P" && player.age < 30) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortKey === "AGE") return a.age - b.age || a.name.localeCompare(b.name);
+      if (sortKey === "CA") return b.currentAbility - a.currentAbility || a.name.localeCompare(b.name);
+      if (sortKey === "POSITION") return a.primaryPosition.localeCompare(b.primaryPosition) || a.name.localeCompare(b.name);
+      if (sortKey === "TEAM") return teamName(world, a.currentTeamId).localeCompare(teamName(world, b.currentTeamId)) || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name);
+    });
+  const safePageIndex = Math.min(pageIndex, Math.max(0, Math.ceil(filtered.length / pageSize) - 1));
+  const paged = filtered.slice(safePageIndex * pageSize, safePageIndex * pageSize + pageSize);
+  const resetPage = (action: () => void) => {
+    action();
+    setPageIndex(0);
+  };
   return (
     <section className="players-layout">
       <Panel title="선수 목록">
-        <label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="이름, 팀, 포지션, 상태 검색" /></label>
+        <label className="search-box"><Search size={16} /><input value={query} onChange={(event) => resetPage(() => setQuery(event.target.value))} placeholder="이름, 팀, 포지션, 상태 검색" /></label>
+        <div className="filter-grid">
+          <label className="form-field">팀<select value={teamFilter} onChange={(event) => resetPage(() => setTeamFilter(event.target.value))}><option value="ALL">전체 팀</option>{data.teams.map((team) => <option key={team.id} value={team.id}>{teamName(world, team.id)}</option>)}</select></label>
+          <label className="form-field">포지션<select value={positionFilter} onChange={(event) => resetPage(() => setPositionFilter(event.target.value))}><option value="ALL">전체</option>{firstLevelPositionsForUi().map((position) => <option key={position} value={position}>{position}</option>)}</select></label>
+          <label className="form-field">국적<select value={nationalityFilter} onChange={(event) => resetPage(() => setNationalityFilter(event.target.value))}><option value="ALL">전체</option>{[...new Set(data.players.map((player) => player.nationalityCode))].sort().map((code) => <option key={code} value={code}>{countryLabel(code)}</option>)}</select></label>
+          <label className="form-field">나이<select value={ageFilter} onChange={(event) => resetPage(() => setAgeFilter(event.target.value))}><option value="ALL">전체</option><option value="U20">20세 미만</option><option value="20S">20대</option><option value="30P">30세 이상</option></select></label>
+          <label className="form-field">로스터<select value={rosterFilter} onChange={(event) => resetPage(() => setRosterFilter(event.target.value))}><option value="ALL">전체</option><option value="ACTIVE">등록</option><option value="RESERVE">예비</option><option value="FREE_AGENT">FA</option><option value="STUDENT">학생</option><option value="AMATEUR">아마추어</option><option value="INDEPENDENT">독립리그</option></select></label>
+          <label className="form-field">정렬<select value={sortKey} onChange={(event) => setSortKey(event.target.value)}><option value="NAME">이름</option><option value="TEAM">팀</option><option value="POSITION">포지션</option><option value="AGE">나이</option><option value="CA">공개 CA</option></select></label>
+        </div>
+        <div className="pagination-row">
+          <span>{filtered.length}명 중 {safePageIndex * pageSize + 1}-{Math.min(filtered.length, (safePageIndex + 1) * pageSize)}명 표시</span>
+          <div className="button-row">
+            <button disabled={safePageIndex === 0} onClick={() => setPageIndex((value) => Math.max(0, value - 1))}>이전</button>
+            <button disabled={(safePageIndex + 1) * pageSize >= filtered.length} onClick={() => setPageIndex((value) => value + 1)}>다음</button>
+          </div>
+        </div>
         <Table headers={["이름", "나이", "국적", "포지션", "팀", "로스터", "건강", "기록"]}>
-          {filtered.slice(0, 80).map((player) => {
+          {paged.map((player) => {
             const stats = data.playerStats[player.id];
             return (
               <tr key={player.id} className={selectedPlayer?.id === player.id ? "selected-row" : ""} onClick={() => setSelectedPlayerId(player.id)}>
@@ -1394,24 +1412,6 @@ function EventLine({ event, world }: { event: WorldEvent; world: LeagueWorld }) 
   return <span>{formatDateKo(event.date)} · {labelEventType(event.type)} · {event.subjectId ? subjectName(world, event.subjectId) : event.teamId ? teamName(world, event.teamId) : ""}</span>;
 }
 
-function navIcon(page: Page) {
-  const size = 16;
-  if (page === "HOME") return <Home size={size} />;
-  if (page === "MANAGER") return <UserRound size={size} />;
-  if (page === "GAMES") return <CalendarDays size={size} />;
-  if (page === "STANDINGS") return <BarChart3 size={size} />;
-  if (page === "ROSTER") return <UsersRound size={size} />;
-  if (page === "TEAMS") return <Shield size={size} />;
-  if (page === "PLAYERS") return <UsersRound size={size} />;
-  if (page === "PROSPECTS") return <Sparkles size={size} />;
-  if (page === "SCOUTING") return <Search size={size} />;
-  if (page === "DRAFT") return <ClipboardCheck size={size} />;
-  if (page === "MARKET") return <Handshake size={size} />;
-  if (page === "RECORDS") return <BarChart3 size={size} />;
-  if (page === "SAVES") return <FileJson size={size} />;
-  return <ListChecks size={size} />;
-}
-
 function autoLineups(world: LeagueWorld, game: GameFixture) {
   for (const teamId of [game.homeTeamId, game.awayTeamId]) {
     if (!findRoster(world, game.id, teamId)) {
@@ -1537,7 +1537,18 @@ function countryLabel(code?: string) {
   if (code === "KR") return "대한민국";
   if (code === "PW") return "퍼시픽 웨스트";
   if (code === "JP") return "일본";
+  if (code === "US") return "미국";
+  if (code === "TW") return "대만";
+  if (code === "DO") return "도미니카공화국";
+  if (code === "VE") return "베네수엘라";
+  if (code === "MX") return "멕시코";
+  if (code === "CA") return "캐나다";
+  if (code === "AU") return "호주";
   return code ?? "-";
+}
+
+function firstLevelPositionsForUi(): BaseballPosition[] {
+  return ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
 }
 
 function gameScore(game: GameFixture) {
