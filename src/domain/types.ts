@@ -58,6 +58,21 @@ export type CompetitionType =
 
 export type GameStatus = "SCHEDULED" | "COMPLETED" | "POSTPONED" | "CANCELLED";
 
+export type GameHalf = "TOP" | "BOTTOM";
+
+export type LiveGameStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+
+export type PlateAppearanceResult =
+  | "STRIKEOUT"
+  | "WALK"
+  | "SINGLE"
+  | "DOUBLE"
+  | "TRIPLE"
+  | "HOME_RUN"
+  | "GROUND_OUT"
+  | "FLY_OUT"
+  | "LINE_OUT";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"
@@ -89,6 +104,7 @@ export type WorldEventType =
   | "SEASON_COMPLETED"
   | "GAME_POSTPONED"
   | "GAME_COMPLETED"
+  | "GAME_STARTED"
   | "GAME_ROSTER_CREATED"
   | "LINEUP_SET"
   | "STARTING_PITCHER_SET"

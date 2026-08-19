@@ -6,12 +6,15 @@ import type {
   ContractStatus,
   CompetitionType,
   GameStatus,
+  GameHalf,
   InjurySeverity,
   InjuryStatus,
   ISODate,
   LeagueCategory,
+  LiveGameStatus,
   ManagerStatus,
   PersonType,
+  PlateAppearanceResult,
   PlayerStatus,
   RosterStatus,
   SeasonStatus,
@@ -34,6 +37,9 @@ export interface League {
   category: LeagueCategory;
   allowDraws?: boolean;
   usesDH?: boolean;
+  regulationInnings?: number;
+  allowExtraInnings?: boolean;
+  maxInnings?: number;
   gameRosterRules?: GameRosterRules;
 }
 
@@ -275,6 +281,88 @@ export interface BullpenAssignment {
 export interface GameResult {
   homeScore: number;
   awayScore: number;
+}
+
+export interface BaseState {
+  first: EntityId | null;
+  second: EntityId | null;
+  third: EntityId | null;
+}
+
+export interface LiveGame {
+  gameId: EntityId;
+  inning: number;
+  half: GameHalf;
+  outs: number;
+  homeScore: number;
+  awayScore: number;
+  bases: BaseState;
+  currentBatterId: EntityId;
+  currentPitcherId: EntityId;
+  homeLineupIndex: number;
+  awayLineupIndex: number;
+  status: LiveGameStatus;
+  boxScore: BoxScore;
+  playByPlay: PlayByPlayEvent[];
+}
+
+export interface PlayByPlayEvent {
+  inning: number;
+  half: GameHalf;
+  batterId: EntityId;
+  pitcherId: EntityId;
+  result: PlateAppearanceResult;
+  runsScored: number;
+  outsAfter: number;
+  scoreAfter: GameResult;
+}
+
+export interface BoxScore {
+  gameId: EntityId;
+  homeTeamId: EntityId;
+  awayTeamId: EntityId;
+  teams: {
+    home: TeamBoxScore;
+    away: TeamBoxScore;
+  };
+  batters: Record<string, BatterGameLine>;
+  pitchers: Record<string, PitcherGameLine>;
+}
+
+export interface TeamBoxScore {
+  teamId: EntityId;
+  inningRuns: number[];
+  runs: number;
+  hits: number;
+  errors: number;
+}
+
+export interface BatterGameLine {
+  playerId: EntityId;
+  teamId: EntityId;
+  plateAppearances: number;
+  atBats: number;
+  hits: number;
+  doubles: number;
+  triples: number;
+  homeRuns: number;
+  walks: number;
+  strikeouts: number;
+  runs: number;
+  runsBattedIn: number;
+}
+
+export interface PitcherGameLine {
+  playerId: EntityId;
+  teamId: EntityId;
+  battersFaced: number;
+  outsRecorded: number;
+  hits: number;
+  runs: number;
+  earnedRuns: number;
+  walks: number;
+  strikeouts: number;
+  homeRuns: number;
 }
 
 export interface StandingRecord {

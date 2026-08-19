@@ -275,6 +275,36 @@ function lineupFrom(playerIds, positions) {
   }));
 }
 
+function createReadyGame(world, options = {}) {
+  if (options.league) {
+    Object.assign(world.leagues.get("league_kr1"), options.league);
+  }
+  const game = createScheduledGame(world, options.scheduledDate ?? "2027-01-01");
+  const seoulPlayers = seedTeamPlayers(world, "team_seoul", options.homePrefix ?? "engine_home");
+  const busanPlayers = seedTeamPlayers(world, "team_busan", options.awayPrefix ?? "engine_away");
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_seoul",
+    activePlayerIds: seoulPlayers,
+    startingLineup: lineupFrom(seoulPlayers, lineupPositionsWithDh),
+    startingPitcherId: seoulPlayers.at(-1),
+    benchPlayerIds: [seoulPlayers.at(-2), seoulPlayers.at(-1)],
+    bullpenPlayerIds: [seoulPlayers.at(-2)],
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+  world.createGameRoster({
+    gameId: game.id,
+    teamId: "team_busan",
+    activePlayerIds: busanPlayers,
+    startingLineup: lineupFrom(busanPlayers, lineupPositionsWithDh),
+    startingPitcherId: busanPlayers.at(-1),
+    benchPlayerIds: [busanPlayers.at(-2), busanPlayers.at(-1)],
+    bullpenPlayerIds: [busanPlayers.at(-2)],
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+  return { game, homePlayers: seoulPlayers, awayPlayers: busanPlayers };
+}
+
 test("countries and leagues are owned by the world before teams are added", () => {
   const world = createWorld();
 
@@ -1794,4 +1824,270 @@ test("game roster invariants catch invalid local mutations", () => {
   assert.ok(issues.some((issue) => issue.includes("not on team")));
   assert.ok(issues.some((issue) => issue.includes("invalid position")));
   assert.ok(issues.some((issue) => issue.includes("duplicate lineup player")));
+});
+
+test("live game starts from a ready fixture with first batter and pitcher", () => {
+  const world = createWorld();
+  const { game, homePlayers, awayPlayers } = createReadyGame(world);
+
+  const liveGame = world.startGame(game.id);
+
+  assert.equal(liveGame.status, "IN_PROGRESS");
+  assert.equal(liveGame.inning, 1);
+  assert.equal(liveGame.half, "TOP");
+  assert.equal(liveGame.currentBatterId, awayPlayers[0]);
+  assert.equal(liveGame.currentPitcherId, homePlayers.at(-1));
+  assert.equal(world.events.at(-1).type, "GAME_STARTED");
+});
+
+test("game start fails when rosters are not ready", () => {
+  const world = createWorld();
+  const game = createScheduledGame(world);
+
+  assert.throws(() => world.startGame(game.id), /Game is not ready/);
+});
+
+test("same seed produces the same simulated game result and play-by-play", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    const { game } = createReadyGame(world, { homePrefix: `same_home_${seed}`, awayPrefix: `same_away_${seed}` });
+    const liveGame = world.simulateGame(game.id);
+    return {
+      result: world.games.get(game.id).result,
+      plays: liveGame.playByPlay.map((play) => [play.inning, play.half, play.batterId, play.pitcherId, play.result, play.scoreAfter]),
+    };
+  }
+
+  assert.deepEqual(run(303), run(303));
+});
+
+test("plate appearance probabilities respond to batter and pitcher ability", () => {
+  const world = createWorld(404);
+  world.addPlayer(createPlayer({
+    id: "elite_batter",
+    birthDate: "1999-01-01",
+    battingRatings: { contact: 95, power: 92, plateDiscipline: 90, speed: 70, fielding: 40, arm: 40 },
+  }));
+  world.addPlayer(createPlayer({
+    id: "weak_batter",
+    birthDate: "1999-01-01",
+    battingRatings: { contact: 20, power: 18, plateDiscipline: 20, speed: 35, fielding: 40, arm: 40 },
+  }));
+  world.addPlayer(createPlayer({
+    id: "elite_pitcher",
+    birthDate: "1995-01-01",
+    primaryPosition: "P",
+    pitchingRatings: { velocity: 95, control: 92, movement: 94, stamina: 88, pitchQuality: 95, repertoire: [{ name: "Fastball", quality: 95 }] },
+  }));
+  world.addPlayer(createPlayer({
+    id: "weak_pitcher",
+    birthDate: "1995-01-01",
+    primaryPosition: "P",
+    pitchingRatings: { velocity: 25, control: 22, movement: 25, stamina: 40, pitchQuality: 24, repertoire: [{ name: "Fastball", quality: 24 }] },
+  }));
+
+  const strongOffense = { hits: 0, homeRuns: 0, strikeouts: 0 };
+  const weakOffense = { hits: 0, homeRuns: 0, strikeouts: 0 };
+  for (let index = 0; index < 600; index += 1) {
+    const strongResult = world.simulatePlateAppearance("elite_batter", "weak_pitcher");
+    if (["SINGLE", "DOUBLE", "TRIPLE", "HOME_RUN"].includes(strongResult)) strongOffense.hits += 1;
+    if (strongResult === "HOME_RUN") strongOffense.homeRuns += 1;
+    if (strongResult === "STRIKEOUT") strongOffense.strikeouts += 1;
+
+    const weakResult = world.simulatePlateAppearance("weak_batter", "elite_pitcher");
+    if (["SINGLE", "DOUBLE", "TRIPLE", "HOME_RUN"].includes(weakResult)) weakOffense.hits += 1;
+    if (weakResult === "HOME_RUN") weakOffense.homeRuns += 1;
+    if (weakResult === "STRIKEOUT") weakOffense.strikeouts += 1;
+  }
+
+  assert.ok(strongOffense.hits > weakOffense.hits);
+  assert.ok(strongOffense.homeRuns > weakOffense.homeRuns);
+  assert.ok(weakOffense.strikeouts > strongOffense.strikeouts);
+});
+
+test("hits advance runners and score with simple base running rules", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+  assert.deepEqual(world.liveGames.get(game.id).bases, { first: awayPlayers[0], second: null, third: null });
+  world.applyPlateAppearanceResult(game.id, "DOUBLE");
+  assert.deepEqual(world.liveGames.get(game.id).bases, { first: null, second: awayPlayers[1], third: awayPlayers[0] });
+  const triple = world.applyPlateAppearanceResult(game.id, "TRIPLE");
+  assert.equal(triple.runsScored, 2);
+  assert.deepEqual(world.liveGames.get(game.id).bases, { first: null, second: null, third: awayPlayers[2] });
+  const homer = world.applyPlateAppearanceResult(game.id, "HOME_RUN");
+  assert.equal(homer.runsScored, 2);
+  assert.deepEqual(world.liveGames.get(game.id).bases, { first: null, second: null, third: null });
+  assert.equal(world.liveGames.get(game.id).awayScore, 4);
+});
+
+test("walk forces in a run with the bases loaded", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+
+  world.applyPlateAppearanceResult(game.id, "WALK");
+  world.applyPlateAppearanceResult(game.id, "WALK");
+  world.applyPlateAppearanceResult(game.id, "WALK");
+  const event = world.applyPlateAppearanceResult(game.id, "WALK");
+
+  assert.equal(event.runsScored, 1);
+  assert.equal(world.liveGames.get(game.id).awayScore, 1);
+  assert.deepEqual(world.liveGames.get(game.id).bases, {
+    first: awayPlayers[3],
+    second: awayPlayers[2],
+    third: awayPlayers[1],
+  });
+});
+
+test("three outs switch half innings and lineup order cycles", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+
+  world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+  world.applyPlateAppearanceResult(game.id, "FLY_OUT");
+  world.applyPlateAppearanceResult(game.id, "STRIKEOUT");
+  const liveGame = world.liveGames.get(game.id);
+
+  assert.equal(liveGame.half, "BOTTOM");
+  assert.equal(liveGame.inning, 1);
+  assert.equal(liveGame.outs, 0);
+  assert.equal(liveGame.awayLineupIndex, 3);
+
+  world.applyPlateAppearanceResult(game.id, "SINGLE");
+  for (let index = 0; index < 8; index += 1) {
+    world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+    if (world.liveGames.get(game.id).half === "TOP") break;
+  }
+  assert.equal(world.liveGames.get(game.id).currentBatterId, awayPlayers[3]);
+});
+
+test("a tied game can complete after nine innings when the league allows draws", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.inning = 9;
+  liveGame.half = "BOTTOM";
+  liveGame.currentBatterId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_seoul").startingLineup[0].playerId;
+  liveGame.currentPitcherId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_busan").startingPitcherId;
+
+  world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+  world.applyPlateAppearanceResult(game.id, "FLY_OUT");
+  world.applyPlateAppearanceResult(game.id, "LINE_OUT");
+
+  assert.equal(world.liveGames.get(game.id).status, "COMPLETED");
+  assert.deepEqual(world.games.get(game.id).result, { homeScore: 0, awayScore: 0 });
+});
+
+test("a tied no-draw game advances to extra innings", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world);
+  world.seasons.get(game.seasonId).allowDraws = false;
+  world.leagues.get("league_kr1").allowExtraInnings = true;
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.inning = 9;
+  liveGame.half = "BOTTOM";
+  liveGame.currentBatterId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_seoul").startingLineup[0].playerId;
+  liveGame.currentPitcherId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_busan").startingPitcherId;
+
+  world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+  world.applyPlateAppearanceResult(game.id, "FLY_OUT");
+  world.applyPlateAppearanceResult(game.id, "LINE_OUT");
+
+  assert.equal(world.liveGames.get(game.id).status, "IN_PROGRESS");
+  assert.equal(world.liveGames.get(game.id).inning, 10);
+  assert.equal(world.liveGames.get(game.id).half, "TOP");
+});
+
+test("home team lead skips the bottom of the ninth", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.inning = 9;
+  liveGame.half = "TOP";
+  liveGame.homeScore = 2;
+  liveGame.awayScore = 1;
+  liveGame.boxScore.teams.home.runs = 2;
+  liveGame.boxScore.teams.away.runs = 1;
+
+  world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+  world.applyPlateAppearanceResult(game.id, "FLY_OUT");
+  world.applyPlateAppearanceResult(game.id, "LINE_OUT");
+
+  assert.equal(world.liveGames.get(game.id).status, "COMPLETED");
+  assert.deepEqual(world.games.get(game.id).result, { homeScore: 2, awayScore: 1 });
+});
+
+test("walk-off scoring completes the game immediately", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.inning = 9;
+  liveGame.half = "BOTTOM";
+  liveGame.homeScore = 3;
+  liveGame.awayScore = 3;
+  liveGame.boxScore.teams.home.runs = 3;
+  liveGame.boxScore.teams.away.runs = 3;
+  liveGame.currentBatterId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_seoul").startingLineup[0].playerId;
+  liveGame.currentPitcherId = [...world.gameRosters.values()].find((roster) => roster.teamId === "team_busan").startingPitcherId;
+  world.applyPlateAppearanceResult(game.id, "HOME_RUN");
+
+  assert.equal(world.liveGames.get(game.id).status, "COMPLETED");
+  assert.deepEqual(world.games.get(game.id).result, { homeScore: 4, awayScore: 3 });
+});
+
+test("simulated game completes with box score, player lines, play-by-play, and standings", () => {
+  const world = createWorld(515);
+  const { game } = createReadyGame(world);
+
+  const liveGame = world.simulateGame(game.id);
+  const boxScore = world.boxScores.get(game.id);
+  const standings = world.getStandings(game.seasonId);
+
+  assert.equal(liveGame.status, "COMPLETED");
+  assert.equal(world.games.get(game.id).status, "COMPLETED");
+  assert.deepEqual(world.games.get(game.id).result, {
+    homeScore: boxScore.teams.home.runs,
+    awayScore: boxScore.teams.away.runs,
+  });
+  assert.ok(Object.values(boxScore.batters).some((line) => line.plateAppearances > 0));
+  assert.ok(Object.values(boxScore.pitchers).some((line) => line.battersFaced > 0));
+  assert.ok(liveGame.playByPlay.length > 0);
+  assert.equal(standings.reduce((sum, record) => sum + record.gamesPlayed, 0), 2);
+  assert.equal(world.events.at(-1).type, "GAME_COMPLETED");
+});
+
+test("completed games cannot be restarted", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world);
+  world.simulateGame(game.id);
+
+  assert.throws(() => world.startGame(game.id), /Completed game cannot be started/);
+});
+
+test("live game invariants catch invalid local mutations", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  liveGame.outs = 4;
+  liveGame.bases.first = awayPlayers[0];
+  liveGame.bases.second = awayPlayers[0];
+  liveGame.currentBatterId = awayPlayers[0];
+  liveGame.currentPitcherId = awayPlayers[1];
+  liveGame.boxScore.teams.away.runs = 99;
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("invalid outs")));
+  assert.ok(issues.some((issue) => issue.includes("same runner")));
+  assert.ok(issues.some((issue) => issue.includes("current batter is already on base")));
+  assert.ok(issues.some((issue) => issue.includes("current pitcher is not on active roster")));
+  assert.ok(issues.some((issue) => issue.includes("box score runs do not match")));
 });
