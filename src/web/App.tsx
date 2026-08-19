@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { type ChangeEvent, useMemo, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -19,6 +19,20 @@ import {
   UsersRound,
 } from "lucide-react";
 import { createSeedWorld, type SeedWorldResult } from "./seedWorld.js";
+import {
+  createWebSave,
+  deleteLocalSave,
+  downloadSave,
+  hasAutosave,
+  listLocalSaves,
+  loadFromLocalStorage,
+  readSaveFile,
+  restoreWebSave,
+  saveSlots,
+  saveToLocalStorage,
+  type SaveSlotKey,
+  type WebSaveMetadata,
+} from "./saveStorage.js";
 import {
   eventCategory,
   describeEvent,
@@ -56,9 +70,10 @@ type Page =
   | "PROSPECTS"
   | "DRAFT"
   | "MARKET"
-  | "EVENTS";
+  | "EVENTS"
+  | "SAVES";
 
-const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "TEAMS", "PLAYERS", "PROSPECTS", "DRAFT", "MARKET", "EVENTS"];
+const pages: Page[] = ["HOME", "MANAGER", "GAMES", "STANDINGS", "TEAMS", "PLAYERS", "PROSPECTS", "DRAFT", "MARKET", "EVENTS", "SAVES"];
 const bullpenRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
 type ManagerTab = "OVERVIEW" | "ROSTER" | "CAREER" | "JOBS" | "OFFERS";
 const managerTabs: Record<ManagerTab, string> = {
@@ -71,21 +86,53 @@ const managerTabs: Record<ManagerTab, string> = {
 
 export function App() {
   const [seed, setSeed] = useState(20270403);
-  const [bundle, setBundle] = useState<SeedWorldResult>(() => createSeedWorld(20270403));
+  const [bundle, setBundle] = useState<SeedWorldResult | undefined>();
   const [version, setVersion] = useState(0);
   const [page, setPage] = useState<Page>("HOME");
-  const [selectedGameId, setSelectedGameId] = useState<EntityId | undefined>(() => [...bundle.world.games.keys()][0]);
+  const [selectedGameId, setSelectedGameId] = useState<EntityId | undefined>();
   const [selectedPlayerId, setSelectedPlayerId] = useState<EntityId | undefined>();
   const [query, setQuery] = useState("");
   const [eventFilter, setEventFilter] = useState("ALL");
   const [managerTab, setManagerTab] = useState<ManagerTab>("OVERVIEW");
-  const [message, setMessage] = useState("시드 세계가 준비되었습니다.");
+  const [message, setMessage] = useState("커리어를 선택해 주세요.");
   const [offerEvaluations, setOfferEvaluations] = useState<Record<string, string>>({});
+  const [saveMetas, setSaveMetas] = useState<Partial<Record<SaveSlotKey, WebSaveMetadata>>>(() => listLocalSaves());
+  const [careerName, setCareerName] = useState("새 감독");
+  const [careerNationality, setCareerNationality] = useState("KR");
+  const [careerStartMode, setCareerStartMode] = useState<"CLUB" | "UNEMPLOYED">("CLUB");
+  const [careerOrganizationId, setCareerOrganizationId] = useState<EntityId>("org_seoul");
+  const data = useMemo(() => (bundle ? makeViewModel(bundle.world, bundle) : undefined), [bundle, version]);
+
+  if (!bundle) {
+    return (
+      <StartScreen
+        seed={seed}
+        setSeed={setSeed}
+        careerName={careerName}
+        setCareerName={setCareerName}
+        careerNationality={careerNationality}
+        setCareerNationality={setCareerNationality}
+        careerStartMode={careerStartMode}
+        setCareerStartMode={setCareerStartMode}
+        careerOrganizationId={careerOrganizationId}
+        setCareerOrganizationId={setCareerOrganizationId}
+        saveMetas={saveMetas}
+        onContinue={() => loadSaveSlot("autosave")}
+        onLoadSlot={loadSaveSlot}
+        onNewCareer={startNewCareer}
+        onImport={importSave}
+        message={message}
+      />
+    );
+  }
 
   const world = bundle.world;
   void version;
 
-  const data = useMemo(() => makeViewModel(world, bundle), [world, bundle, version]);
+  if (!data) {
+    throw new Error("월드 화면 데이터를 만들 수 없습니다.");
+  }
+
   const selectedGame = selectedGameId ? world.games.get(selectedGameId) : data.games[0];
   const selectedPlayer = selectedPlayerId ? world.players.get(selectedPlayerId) : undefined;
 
@@ -94,13 +141,19 @@ export function App() {
       action();
       setVersion((value) => value + 1);
       setMessage(localizeEngineMessage(label));
+      autoSave();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
 
   const resetWorld = () => {
-    const next = createSeedWorld(seed);
+    const next = createSeedWorld(seed, {
+      managerName: careerName,
+      managerNationalityCode: careerNationality,
+      startMode: careerStartMode,
+      organizationId: careerOrganizationId,
+    });
     setBundle(next);
     setSelectedGameId([...next.world.games.keys()][0]);
     setSelectedPlayerId(undefined);
@@ -108,6 +161,89 @@ export function App() {
     setVersion((value) => value + 1);
     setMessage(`시드 ${seed}로 세계를 초기화했습니다.`);
   };
+
+  function startNewCareer() {
+    const next = createSeedWorld(seed, {
+      managerName: careerName,
+      managerNationalityCode: careerNationality,
+      startMode: careerStartMode,
+      organizationId: careerOrganizationId,
+    });
+    setBundle(next);
+    setSelectedGameId([...next.world.games.keys()][0]);
+    setSelectedPlayerId(undefined);
+    setOfferEvaluations({});
+    setPage("HOME");
+    setVersion((value) => value + 1);
+    saveToLocalStorage("autosave", createWebSave(next, "자동 저장"));
+    setSaveMetas(listLocalSaves());
+    setMessage("새 커리어를 시작했습니다.");
+  }
+
+  function autoSave() {
+    if (!bundle) return;
+    saveToLocalStorage("autosave", createWebSave(bundle, "자동 저장"));
+    setSaveMetas(listLocalSaves());
+  }
+
+  function saveSlot(slot: SaveSlotKey) {
+    if (!bundle) return;
+    saveToLocalStorage(slot, createWebSave(bundle, slot === "autosave" ? "자동 저장" : `저장 슬롯 ${slot.slice(-1)}`));
+    setSaveMetas(listLocalSaves());
+    setMessage("저장했습니다.");
+  }
+
+  function loadSaveSlot(slot: SaveSlotKey) {
+    try {
+      const save = loadFromLocalStorage(slot);
+      if (!save) throw new Error("저장 슬롯이 비어 있습니다.");
+      const next = restoreWebSave(save);
+      setBundle(next);
+      setSeed(next.seed);
+      setSelectedGameId([...next.world.games.keys()][0]);
+      setSelectedPlayerId(undefined);
+      setOfferEvaluations({});
+      setPage("HOME");
+      setVersion((value) => value + 1);
+      setSaveMetas(listLocalSaves());
+      setMessage("저장 데이터를 불러왔습니다.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function deleteSlot(slot: SaveSlotKey) {
+    if (!window.confirm("이 저장 슬롯을 삭제할까요?")) return;
+    deleteLocalSave(slot);
+    setSaveMetas(listLocalSaves());
+    setMessage("저장 슬롯을 삭제했습니다.");
+  }
+
+  function exportSave() {
+    if (!bundle) return;
+    downloadSave(createWebSave(bundle, "LEAGUE 저장"));
+    setMessage("저장 파일을 내보냈습니다.");
+  }
+
+  async function importSave(event: ChangeEvent<HTMLInputElement>) {
+    try {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      const save = await readSaveFile(file);
+      const next = restoreWebSave(save);
+      setBundle(next);
+      setSeed(next.seed);
+      setSelectedGameId([...next.world.games.keys()][0]);
+      setSelectedPlayerId(undefined);
+      setOfferEvaluations({});
+      setPage("HOME");
+      setVersion((value) => value + 1);
+      setMessage("저장 파일을 가져왔습니다.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   const evaluateOfferForUi = (offerId: EntityId) => {
     try {
@@ -179,8 +315,77 @@ export function App() {
         {page === "DRAFT" && <DraftPage bundle={bundle} data={data} world={world} mutate={mutate} />}
         {page === "MARKET" && <MarketPage data={data} world={world} mutate={mutate} offerEvaluations={offerEvaluations} onEvaluateOffer={evaluateOfferForUi} />}
         {page === "EVENTS" && <EventsPage world={world} filter={eventFilter} setFilter={setEventFilter} />}
+        {page === "SAVES" && <SavePage metas={saveMetas} onSave={saveSlot} onLoad={loadSaveSlot} onDelete={deleteSlot} onExport={exportSave} onImport={importSave} />}
       </main>
     </div>
+  );
+}
+
+function StartScreen({
+  seed,
+  setSeed,
+  careerName,
+  setCareerName,
+  careerNationality,
+  setCareerNationality,
+  careerStartMode,
+  setCareerStartMode,
+  careerOrganizationId,
+  setCareerOrganizationId,
+  saveMetas,
+  onContinue,
+  onLoadSlot,
+  onNewCareer,
+  onImport,
+  message,
+}: {
+  seed: number;
+  setSeed: (seed: number) => void;
+  careerName: string;
+  setCareerName: (name: string) => void;
+  careerNationality: string;
+  setCareerNationality: (code: string) => void;
+  careerStartMode: "CLUB" | "UNEMPLOYED";
+  setCareerStartMode: (mode: "CLUB" | "UNEMPLOYED") => void;
+  careerOrganizationId: EntityId;
+  setCareerOrganizationId: (id: EntityId) => void;
+  saveMetas: Partial<Record<SaveSlotKey, WebSaveMetadata>>;
+  onContinue: () => void;
+  onLoadSlot: (slot: SaveSlotKey) => void;
+  onNewCareer: () => void;
+  onImport: (event: ChangeEvent<HTMLInputElement>) => void;
+  message: string;
+}) {
+  return (
+    <main className="start-screen">
+      <section className="start-hero">
+        <div className="brand">
+          <div className="brand-mark">LW</div>
+          <div>
+            <strong>LEAGUE</strong>
+            <span>계속 플레이 가능한 야구 세계</span>
+          </div>
+        </div>
+        <div className="status-line">{message}</div>
+        <div className="button-row">
+          <button disabled={!hasAutosave()} onClick={onContinue}><Play size={16} />이어하기</button>
+          <button onClick={onNewCareer}><Sparkles size={16} />새 커리어</button>
+          <label className="file-button"><FileJson size={16} />저장 불러오기<input type="file" accept="application/json,.json,.league-save.json" onChange={onImport} /></label>
+        </div>
+      </section>
+      <section className="start-grid">
+        <Panel title="새 커리어">
+          <label className="form-field">감독 이름<input value={careerName} onChange={(event) => setCareerName(event.target.value)} /></label>
+          <label className="form-field">국적<select value={careerNationality} onChange={(event) => setCareerNationality(event.target.value)}><option value="KR">대한민국</option><option value="JP">일본</option><option value="PW">퍼시픽 웨스트</option></select></label>
+          <label className="form-field">시드<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
+          <label className="form-field">시작 방식<select value={careerStartMode} onChange={(event) => setCareerStartMode(event.target.value as "CLUB" | "UNEMPLOYED")}><option value="CLUB">구단 선택</option><option value="UNEMPLOYED">무직</option></select></label>
+          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option></select></label>
+        </Panel>
+        <Panel title="저장 슬롯">
+          <SaveSlotList metas={saveMetas} onLoad={onLoadSlot} />
+        </Panel>
+      </section>
+    </main>
   );
 }
 
@@ -793,6 +998,74 @@ function EventsPage({ world, filter, setFilter }: { world: LeagueWorld; filter: 
   );
 }
 
+function SavePage({
+  metas,
+  onSave,
+  onLoad,
+  onDelete,
+  onExport,
+  onImport,
+}: {
+  metas: Partial<Record<SaveSlotKey, WebSaveMetadata>>;
+  onSave: (slot: SaveSlotKey) => void;
+  onLoad: (slot: SaveSlotKey) => void;
+  onDelete: (slot: SaveSlotKey) => void;
+  onExport: () => void;
+  onImport: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <section className="section-stack">
+      <Panel title="저장 / 불러오기">
+        <Table headers={["슬롯", "저장 이름", "저장 시각", "게임 날짜", "감독", "현재 구단", "시즌", "작업"]}>
+          {saveSlots.map((slot) => {
+            const meta = metas[slot];
+            return (
+              <tr key={slot}>
+                <td>{slotLabel(slot)}</td>
+                <td>{meta?.name ?? "비어 있음"}</td>
+                <td>{formatSavedAt(meta?.savedAt)}</td>
+                <td>{formatDateKo(meta?.gameDate)}</td>
+                <td>{localizeEntityName(meta?.managerName)}</td>
+                <td>{localizeEntityName(meta?.currentOrganizationName)}</td>
+                <td>{localizeEntityName(meta?.seasonName)}</td>
+                <td>
+                  <div className="button-row">
+                    <button onClick={() => onSave(slot)}>{meta ? "덮어쓰기" : "저장"}</button>
+                    <button disabled={!meta} onClick={() => onLoad(slot)}>불러오기</button>
+                    <button disabled={!meta} onClick={() => onDelete(slot)}>삭제</button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </Table>
+      </Panel>
+      <Panel title="JSON 백업">
+        <div className="button-row">
+          <button onClick={onExport}><FileJson size={16} />저장파일 내보내기</button>
+          <label className="file-button"><FileJson size={16} />저장파일 가져오기<input type="file" accept="application/json,.json,.league-save.json" onChange={onImport} /></label>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function SaveSlotList({ metas, onLoad }: { metas: Partial<Record<SaveSlotKey, WebSaveMetadata>>; onLoad: (slot: SaveSlotKey) => void }) {
+  return (
+    <div className="compact-list">
+      {saveSlots.map((slot) => {
+        const meta = metas[slot];
+        return (
+          <button className="row-button" key={slot} disabled={!meta} onClick={() => onLoad(slot)}>
+            <span>{slotLabel(slot)} · {meta ? `${localizeEntityName(meta.managerName)} / ${formatDateKo(meta.gameDate)}` : "비어 있음"}</span>
+            <strong>{meta ? "불러오기" : "-"}</strong>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function DebugPanel({
   bundle,
   seed,
@@ -959,6 +1232,7 @@ function navIcon(page: Page) {
   if (page === "PROSPECTS") return <Sparkles size={size} />;
   if (page === "DRAFT") return <ClipboardCheck size={size} />;
   if (page === "MARKET") return <Handshake size={size} />;
+  if (page === "SAVES") return <FileJson size={size} />;
   return <ListChecks size={size} />;
 }
 
@@ -1057,6 +1331,20 @@ function confidenceLabel(value: number | undefined) {
   if (value >= 45) return `보통 (${value})`;
   if (value >= 25) return `불안 (${value})`;
   return `매우 불안 (${value})`;
+}
+
+function slotLabel(slot: SaveSlotKey) {
+  if (slot === "autosave") return "자동 저장";
+  if (slot === "slot1") return "저장 슬롯 1";
+  if (slot === "slot2") return "저장 슬롯 2";
+  return "저장 슬롯 3";
+}
+
+function formatSavedAt(value: string | undefined) {
+  if (!value || value === "-") return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR");
 }
 
 function labelManagerRole(value: string) {

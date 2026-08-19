@@ -3,5 +3,6 @@ export * from "./domain/types.js";
 export * from "./engine/career.js";
 export * from "./engine/clock.js";
 export * from "./engine/ids.js";
+export * from "./engine/persistence.js";
 export * from "./engine/rng.js";
 export * from "./engine/world.js";

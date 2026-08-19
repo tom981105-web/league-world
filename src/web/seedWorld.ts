@@ -19,6 +19,13 @@ export interface SeedWorldResult {
   seed: number;
 }
 
+export interface SeedWorldOptions {
+  managerName?: string;
+  managerNationalityCode?: string;
+  startMode?: "UNEMPLOYED" | "CLUB";
+  organizationId?: EntityId;
+}
+
 const firstLevelPositions: BaseballPosition[] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
 const pitcherRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "FLEXIBLE"];
 
@@ -52,7 +59,7 @@ const names = [
   "손예준",
 ];
 
-export function createSeedWorld(seed = 20270403): SeedWorldResult {
+export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
   const world = new LeagueWorld(new WorldClock("2027-04-03"), new Mulberry32Random(seed));
   world.addCountry({ id: "country_kr", code: "KR", name: "Korea Republic" });
   world.addCountry({ id: "country_pw", code: "PW", name: "Pacific West" });
@@ -168,12 +175,13 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
 
   for (const org of organizations) {
     seedOrganization(world, seed, org.id);
+    const isUserManager = org.id === (options.organizationId ?? "org_seoul") && options.startMode !== "UNEMPLOYED";
     world.addManager({
       id: `mgr_${org.id}`,
-      name: `${org.city} Manager`,
+      name: isUserManager ? (options.managerName ?? `${org.city} Manager`) : `${org.city} Manager`,
       birthDate: "1979-02-10",
-      nationality: "대한민국",
-      nationalityCode: "KR",
+      nationality: countryNameForCode(isUserManager ? options.managerNationalityCode : "KR"),
+      nationalityCode: isUserManager ? (options.managerNationalityCode ?? "KR") : "KR",
       status: "EMPLOYED",
       reputation: org.id === "org_seoul" ? 72 : 58,
       currentTeamId: teamIdFor(org.id, "top"),
@@ -257,15 +265,37 @@ export function createSeedWorld(seed = 20270403): SeedWorldResult {
     reason: "해외 구단 감독 제안",
   });
 
+  let userManagerId = `mgr_${options.organizationId ?? "org_seoul"}`;
+  let userTeamId = teamIdFor(options.organizationId ?? "org_seoul", "top");
+  if (options.startMode === "UNEMPLOYED") {
+    userManagerId = "mgr_user";
+    userTeamId = "team_org_seoul_top";
+    world.addManager({
+      id: userManagerId,
+      name: options.managerName ?? "새 감독",
+      birthDate: "1984-03-01",
+      nationality: countryNameForCode(options.managerNationalityCode),
+      nationalityCode: options.managerNationalityCode ?? "KR",
+      status: "UNEMPLOYED",
+      reputation: 45,
+    });
+  }
+
   return {
     world,
-    userManagerId: "mgr_org_seoul",
-    userTeamId: "team_org_seoul_top",
+    userManagerId,
+    userTeamId,
     seasonId: season.id,
     competitionId: competition.id,
     draftId: draft.id,
     seed,
   };
+}
+
+function countryNameForCode(code = "KR"): string {
+  if (code === "JP") return "일본";
+  if (code === "PW") return "퍼시픽 웨스트";
+  return "대한민국";
 }
 
 function seedOrganization(world: LeagueWorld, seed: number, organizationId: EntityId): void {

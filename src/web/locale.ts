@@ -10,7 +10,8 @@ export type PageKey =
   | "PROSPECTS"
   | "DRAFT"
   | "MARKET"
-  | "EVENTS";
+  | "EVENTS"
+  | "SAVES";
 
 export const pageLabels: Record<PageKey, string> = {
   HOME: "홈",
@@ -23,6 +24,7 @@ export const pageLabels: Record<PageKey, string> = {
   DRAFT: "드래프트",
   MARKET: "이적시장",
   EVENTS: "이벤트",
+  SAVES: "저장",
 };
 
 const statusLabels: Record<string, string> = {

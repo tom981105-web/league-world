@@ -31,4 +31,14 @@ export class Mulberry32Random implements RandomSource {
     if (probability >= 1) return true;
     return this.next() < probability;
   }
+
+  getState(): number {
+    return this.state >>> 0;
+  }
+
+  static fromState(state: number): Mulberry32Random {
+    const rng = new Mulberry32Random(0);
+    rng.state = state >>> 0;
+    return rng;
+  }
 }

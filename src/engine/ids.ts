@@ -12,4 +12,16 @@ export class SequentialIdGenerator implements IdGenerator {
     this.counters.set(prefix, nextValue);
     return `${prefix}_${nextValue}`;
   }
+
+  getState(): Record<string, number> {
+    return Object.fromEntries(this.counters);
+  }
+
+  static fromState(state: Record<string, number>): SequentialIdGenerator {
+    const ids = new SequentialIdGenerator();
+    for (const [prefix, value] of Object.entries(state)) {
+      ids.counters.set(prefix, value);
+    }
+    return ids;
+  }
 }

@@ -17,7 +17,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -110,6 +111,28 @@ nav button.active {
 main {
   min-width: 0;
   padding: 18px;
+}
+
+.start-screen {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.start-hero {
+  display: grid;
+  gap: 14px;
+  max-width: 980px;
+  margin: 0 auto 18px;
+  border-bottom: 1px solid #1e2c38;
+  padding-bottom: 18px;
+}
+
+.start-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) minmax(360px, 1fr);
+  gap: 12px;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
 .fatal-screen {
@@ -334,13 +357,45 @@ tr:hover td,
 }
 
 .search-box input,
-.debug-panel input {
+.debug-panel input,
+.form-field input,
+.form-field select {
   width: 100%;
   min-width: 0;
   border: 0;
   color: #e6edf3;
   background: transparent;
   outline: none;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  border: 1px solid #263747;
+  border-radius: 6px;
+  padding: 8px 9px;
+  color: #8ca0b3;
+  background: #0b131b;
+  font-size: 12px;
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid #263747;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #dce7f1;
+  background: #12202c;
+  cursor: pointer;
+}
+
+.file-button input {
+  display: none;
 }
 
 .debug-panel {
@@ -375,6 +430,10 @@ tr:hover td,
   .draft-layout,
   .dashboard-grid,
   .market-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .start-grid {
     grid-template-columns: 1fr;
   }
 
