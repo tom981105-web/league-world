@@ -7,6 +7,9 @@ import type {
   BattingLeaderboardEntry,
   Competition,
   Country,
+  Draft,
+  DraftEligibility,
+  DraftPick,
   GameActionHistoryEntry,
   GameDayRoster,
   GameFixture,
@@ -31,7 +34,11 @@ import type {
   PlayerInjury,
   StartingLineupSlot,
   Player,
+  ProspectRankingEntry,
   RosterAssignment,
+  Scout,
+  ScoutingAttributeEstimates,
+  ScoutingReport,
   Season,
   StandingRecord,
   Team,
@@ -39,6 +46,7 @@ import type {
 } from "../domain/entities.js";
 import type {
   CompetitionType,
+  DraftDecision,
   EntityId,
   BaseballPosition,
   BattingLeaderCategory,
@@ -52,6 +60,7 @@ import type {
   PitchingLeaderCategory,
   PersonType,
   RosterStatus,
+  ScoutingRecommendation,
   WorldEventType,
 } from "../domain/types.js";
 import {
@@ -76,12 +85,15 @@ type PlayerInput = Omit<
   | "developmentProfile"
   | "injury"
   | "gameCondition"
+  | "trueCurrentAbility"
+  | "truePotentialAbility"
   | "currentOrganizationId"
   | "currentRosterAssignmentId"
   | "rosterStatus"
   | "rosterAssignments"
   | "contracts"
   | "careerEntries"
+  | "draftEligibility"
 > &
   Partial<
     Pick<
@@ -96,12 +108,15 @@ type PlayerInput = Omit<
       | "developmentProfile"
       | "injury"
       | "gameCondition"
+      | "trueCurrentAbility"
+      | "truePotentialAbility"
       | "currentOrganizationId"
       | "currentRosterAssignmentId"
       | "rosterStatus"
       | "rosterAssignments"
       | "contracts"
       | "careerEntries"
+      | "draftEligibility"
     >
   >;
 type ManagerInput = Omit<Manager, "careerEntries"> & Partial<Pick<Manager, "careerEntries">>;
@@ -116,6 +131,20 @@ type GameDayRosterInput = Omit<
   "id" | "startingLineup" | "benchPlayerIds" | "bullpenPlayerIds" | "rules"
 > &
   Partial<Pick<GameDayRoster, "id" | "startingLineup" | "benchPlayerIds" | "bullpenPlayerIds" | "rules">>;
+type ScoutInput = Omit<Scout, "id"> & Partial<Pick<Scout, "id">>;
+type DraftInput = Omit<Draft, "id" | "status" | "participatingOrganizationIds" | "draftOrder" | "picks"> &
+  Partial<Pick<Draft, "id" | "status" | "participatingOrganizationIds" | "draftOrder">>;
+
+export interface ScoutingReportOptions {
+  observedOn?: ISODate;
+}
+
+export interface ProspectRankingOptions {
+  organizationId?: EntityId;
+  draftLeagueId?: EntityId;
+  positions?: string[];
+  limit?: number;
+}
 
 export interface AutoGenerateLineupOptions {
   gameId: EntityId;
@@ -164,6 +193,9 @@ export class LeagueWorld {
   readonly players = new Map<EntityId, Player>();
   readonly managers = new Map<EntityId, Manager>();
   readonly teams = new Map<EntityId, Team>();
+  readonly scouts = new Map<EntityId, Scout>();
+  readonly scoutingReports = new Map<EntityId, ScoutingReport>();
+  readonly drafts = new Map<EntityId, Draft>();
   readonly events: WorldEvent[] = [];
 
   constructor(
@@ -465,6 +497,282 @@ export class LeagueWorld {
         return valueOrder || b.stats.outsRecorded - a.stats.outsRecorded || a.playerId.localeCompare(b.playerId);
       });
     return entries.slice(0, options.limit ?? entries.length);
+  }
+
+  addScout(input: ScoutInput): Scout {
+    this.requireOrganization(input.organizationId);
+    const scout: Scout = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("scout"),
+      abilityEvaluation: this.clampRating(input.abilityEvaluation),
+      potentialEvaluation: this.clampRating(input.potentialEvaluation),
+      regionalKnowledge: this.clampRating(input.regionalKnowledge),
+      experience: this.clampRating(input.experience),
+    };
+    this.scouts.set(scout.id, scout);
+    this.assertInvariants();
+    return structuredClone(scout);
+  }
+
+  createScoutingReport(
+    scoutId: EntityId,
+    playerId: EntityId,
+    options: ScoutingReportOptions = {},
+  ): ScoutingReport {
+    const scout = this.requireScout(scoutId);
+    const player = this.requirePlayer(playerId);
+    const priorCount = [...this.scoutingReports.values()].filter(
+      (report) => report.playerId === playerId && report.organizationId === scout.organizationId,
+    ).length;
+    const abilitySkill = (scout.abilityEvaluation * 0.55 + scout.experience * 0.25 + scout.regionalKnowledge * 0.2);
+    const potentialSkill = (scout.potentialEvaluation * 0.6 + scout.experience * 0.25 + scout.regionalKnowledge * 0.15);
+    const confidence = this.clampRating(25 + abilitySkill * 0.28 + potentialSkill * 0.22 + priorCount * 12);
+    const caError = this.scoutingError(abilitySkill, priorCount);
+    const paError = this.scoutingError(potentialSkill, priorCount);
+    const estimatedCA = this.clampRating(player.trueCurrentAbility + caError);
+    const estimatedPA = this.clampRating(player.truePotentialAbility + paError);
+    const rangeWidth = Math.max(4, Math.round((100 - confidence) * 0.32));
+    const estimatedPARange = {
+      low: this.clampRating(estimatedPA - rangeWidth),
+      high: this.clampRating(estimatedPA + rangeWidth),
+    };
+    if (estimatedPARange.high < estimatedPARange.low) {
+      estimatedPARange.high = estimatedPARange.low;
+    }
+    const report: ScoutingReport = {
+      id: this.ids.nextId("scout_report"),
+      scoutId,
+      playerId,
+      organizationId: scout.organizationId,
+      observedOn: options.observedOn ?? this.clock.now(),
+      estimatedCA,
+      estimatedPARange,
+      attributeEstimates: this.estimateAttributes(player, abilitySkill, priorCount),
+      confidence,
+      overallGrade: this.clampRating(estimatedCA * 0.35 + ((estimatedPARange.low + estimatedPARange.high) / 2) * 0.65),
+      recommendation: this.scoutingRecommendation(estimatedCA, estimatedPARange, confidence),
+    };
+    this.scoutingReports.set(report.id, report);
+    this.assertInvariants();
+    return structuredClone(report);
+  }
+
+  getProspectRankings(options: ProspectRankingOptions = {}): ProspectRankingEntry[] {
+    if (options.organizationId) this.requireOrganization(options.organizationId);
+    if (options.draftLeagueId) this.requireLeague(options.draftLeagueId);
+    const positionSet = options.positions ? new Set(options.positions) : undefined;
+    const entries = [...this.players.values()]
+      .filter((player) => this.isProspectCandidate(player))
+      .filter((player) => !positionSet || positionSet.has(player.primaryPosition))
+      .filter((player) => !options.draftLeagueId || player.draftEligibility?.draftLeagueId === options.draftLeagueId)
+      .map((player) => {
+        const report = this.latestScoutingReport(player.id, options.organizationId);
+        const estimatedCA = report?.estimatedCA ?? this.publicProspectEstimate(player, "CA");
+        const estimatedPARange = report?.estimatedPARange ?? {
+          low: this.clampRating(this.publicProspectEstimate(player, "PA") - 18),
+          high: this.clampRating(this.publicProspectEstimate(player, "PA") + 18),
+        };
+        const confidence = report?.confidence ?? 15;
+        const score =
+          estimatedCA * 0.25 +
+          ((estimatedPARange.low + estimatedPARange.high) / 2) * 0.58 +
+          confidence * 0.08 -
+          Math.max(0, player.age - 18) * 1.7 +
+          this.positionScarcityBonus(player.primaryPosition, options.organizationId);
+        return {
+          rank: 0,
+          playerId: player.id,
+          ...(report ? { reportId: report.id } : {}),
+          score: this.roundRate(score),
+          estimatedCA,
+          estimatedPARange: structuredClone(estimatedPARange),
+          confidence,
+          age: player.age,
+          primaryPosition: player.primaryPosition,
+        };
+      })
+      .sort((a, b) => b.score - a.score || b.confidence - a.confidence || a.playerId.localeCompare(b.playerId))
+      .slice(0, options.limit ?? Number.POSITIVE_INFINITY);
+    return entries.map((entry, index) => ({ ...entry, rank: index + 1 }));
+  }
+
+  evaluateDraftEligibility(playerId: EntityId, draftLeagueId: EntityId, draftYear: number): DraftEligibility {
+    const player = this.requirePlayer(playerId);
+    this.requireLeague(draftLeagueId);
+    const eligible =
+      player.status !== "RETIRED" &&
+      player.status !== "PROFESSIONAL" &&
+      player.age >= 15 &&
+      player.age <= 25;
+    const eligibility: DraftEligibility = {
+      eligible,
+      declared: false,
+      draftYear,
+      draftLeagueId,
+      reason: eligible ? "드래프트 자격 충족" : "드래프트 자격 미충족",
+      status: eligible ? "ELIGIBLE" : "NOT_ELIGIBLE",
+    };
+    player.draftEligibility = eligibility;
+    this.assertInvariants();
+    return structuredClone(eligibility);
+  }
+
+  decideDraftDeclaration(playerId: EntityId, draftLeagueId: EntityId, draftYear: number): DraftEligibility {
+    const player = this.requirePlayer(playerId);
+    const base = player.draftEligibility?.draftLeagueId === draftLeagueId && player.draftEligibility.draftYear === draftYear
+      ? player.draftEligibility
+      : this.evaluateDraftEligibility(playerId, draftLeagueId, draftYear);
+    if (!base.eligible) return structuredClone(base);
+    const decision = this.chooseDraftDecision(player);
+    const declared = decision === "DECLARE";
+    player.draftEligibility = {
+      ...base,
+      declared,
+      decision,
+      status: declared ? "DECLARED" : "ELIGIBLE",
+      reason: this.draftDecisionReason(decision),
+    };
+    if (declared) {
+      this.record("DRAFT_DECLARED", {
+        subjectId: player.id,
+        reason: player.draftEligibility.reason,
+        payload: { draftLeagueId, draftYear, decision },
+      });
+    }
+    this.assertInvariants();
+    return structuredClone(player.draftEligibility);
+  }
+
+  createDraft(input: DraftInput): Draft {
+    const season = this.requireSeason(input.seasonId);
+    if (season.leagueId !== input.leagueId) {
+      throw new Error(`Draft league must match season league: ${input.leagueId}`);
+    }
+    this.requireLeague(input.leagueId);
+    if (!Number.isInteger(input.rounds) || input.rounds <= 0) {
+      throw new Error("Draft rounds must be a positive integer");
+    }
+    const draftOrder = input.draftOrder?.length
+      ? structuredClone(input.draftOrder)
+      : this.defaultDraftOrder(input.seasonId);
+    const participatingOrganizationIds = input.participatingOrganizationIds?.length
+      ? structuredClone(input.participatingOrganizationIds)
+      : [...new Set(draftOrder)];
+    if (draftOrder.length === 0) {
+      throw new Error("Draft order requires at least one organization");
+    }
+    for (const organizationId of participatingOrganizationIds) this.requireOrganization(organizationId);
+    for (const organizationId of draftOrder) {
+      this.requireOrganization(organizationId);
+      if (!participatingOrganizationIds.includes(organizationId)) {
+        throw new Error(`Draft order organization is not participating: ${organizationId}`);
+      }
+    }
+    const draftId = input.id ?? this.ids.nextId("draft");
+    const picks: DraftPick[] = [];
+    let overallPick = 1;
+    for (let round = 1; round <= input.rounds; round += 1) {
+      for (const organizationId of draftOrder) {
+        picks.push({
+          id: this.ids.nextId("pick"),
+          draftId,
+          round,
+          overallPick,
+          organizationId,
+          status: "UNSELECTED",
+        });
+        overallPick += 1;
+      }
+    }
+    const draft: Draft = {
+      id: draftId,
+      leagueId: input.leagueId,
+      seasonId: input.seasonId,
+      year: input.year,
+      rounds: input.rounds,
+      status: input.status ?? "SCHEDULED",
+      participatingOrganizationIds,
+      draftOrder,
+      picks,
+    };
+    this.drafts.set(draft.id, draft);
+    this.assertInvariants();
+    return structuredClone(draft);
+  }
+
+  getAvailableDraftPlayers(draftId: EntityId): Player[] {
+    const draft = this.requireDraft(draftId);
+    const selected = new Set(draft.picks.flatMap((pick) => pick.playerId ? [pick.playerId] : []));
+    return [...this.players.values()]
+      .filter((player) =>
+        player.draftEligibility?.eligible &&
+        player.draftEligibility.declared &&
+        player.draftEligibility.draftLeagueId === draft.leagueId &&
+        player.draftEligibility.draftYear === draft.year &&
+        player.status !== "RETIRED" &&
+        !selected.has(player.id)
+      )
+      .map((player) => structuredClone(player))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  makeDraftPick(draftId: EntityId, organizationId: EntityId, playerId: EntityId): DraftPick {
+    const draft = this.requireDraft(draftId);
+    const player = this.requirePlayer(playerId);
+    this.requireOrganization(organizationId);
+    if (draft.status === "COMPLETED") throw new Error(`Completed draft cannot add picks: ${draftId}`);
+    if (!draft.participatingOrganizationIds.includes(organizationId)) {
+      throw new Error(`Organization is not participating in draft: ${organizationId}`);
+    }
+    if (draft.picks.some((pick) => pick.playerId === playerId)) {
+      throw new Error(`Player already selected in draft: ${playerId}`);
+    }
+    this.assertPlayerDraftEligible(player, draft);
+    const pick = this.nextDraftPick(draft, organizationId);
+    if (!pick) throw new Error(`No remaining pick for organization ${organizationId}`);
+    draft.status = "IN_PROGRESS";
+    pick.playerId = player.id;
+    pick.selectedAt = this.clock.now();
+    pick.status = "DRAFTED";
+    player.draftEligibility = {
+      ...player.draftEligibility!,
+      status: "DRAFTED",
+      declared: true,
+      reason: "프로 드래프트 지명",
+    };
+    this.recordDraftCareerEntry(player, draft, pick);
+    this.record("PLAYER_DRAFTED", {
+      subjectId: player.id,
+      reason: "프로 드래프트 지명",
+      payload: { draftId, organizationId, round: pick.round, overallPick: pick.overallPick },
+    });
+    this.assertInvariants();
+    return structuredClone(pick);
+  }
+
+  autoDraftPick(draftId: EntityId, organizationId?: EntityId): DraftPick {
+    const draft = this.requireDraft(draftId);
+    const pick = organizationId ? this.nextDraftPick(draft, organizationId) : draft.picks.find((candidate) => !candidate.playerId);
+    if (!pick) throw new Error(`No remaining draft pick: ${draftId}`);
+    const candidates = this.getAvailableDraftPlayers(draftId);
+    if (candidates.length === 0) throw new Error(`No available draft players: ${draftId}`);
+    const selected = candidates
+      .map((player) => ({
+        player,
+        score: this.draftBoardScore(player, pick.organizationId),
+      }))
+      .sort((a, b) => b.score - a.score || a.player.id.localeCompare(b.player.id))[0]!.player;
+    return this.makeDraftPick(draftId, pick.organizationId, selected.id);
+  }
+
+  runDraft(draftId: EntityId): Draft {
+    const draft = this.requireDraft(draftId);
+    while (draft.picks.some((pick) => !pick.playerId) && this.getAvailableDraftPlayers(draftId).length > 0) {
+      this.autoDraftPick(draftId);
+    }
+    this.completeDraft(draft);
+    this.assertInvariants();
+    return structuredClone(draft);
   }
 
   createGameRoster(input: GameDayRosterInput): GameDayRoster {
@@ -1501,6 +1809,7 @@ export class LeagueWorld {
     const issues: string[] = [];
     this.validateSeasonAndScheduleInvariants(issues);
     this.validateGameRosterInvariants(issues);
+    this.validateScoutingAndDraftInvariants(issues);
     for (const player of this.players.values()) {
       this.validatePlayerModel(player, issues);
       this.validatePersonCareer(player, "PLAYER", player.status, player.currentTeamId, issues);
@@ -1573,6 +1882,116 @@ export class LeagueWorld {
     const issues = this.validateInvariants();
     if (issues.length > 0) {
       throw new Error(`World invariant violation: ${issues.join("; ")}`);
+    }
+  }
+
+  private validateScoutingAndDraftInvariants(issues: string[]): void {
+    for (const scout of this.scouts.values()) {
+      if (!this.organizations.has(scout.organizationId)) {
+        issues.push(`Scout ${scout.id} has missing organization ${scout.organizationId}`);
+      }
+      this.validateRating(scout.abilityEvaluation, `Scout ${scout.id} abilityEvaluation`, issues);
+      this.validateRating(scout.potentialEvaluation, `Scout ${scout.id} potentialEvaluation`, issues);
+      this.validateRating(scout.regionalKnowledge, `Scout ${scout.id} regionalKnowledge`, issues);
+      this.validateRating(scout.experience, `Scout ${scout.id} experience`, issues);
+    }
+
+    for (const report of this.scoutingReports.values()) {
+      const scout = this.scouts.get(report.scoutId);
+      if (!scout) issues.push(`Scouting report ${report.id} has missing scout ${report.scoutId}`);
+      if (!this.players.has(report.playerId)) issues.push(`Scouting report ${report.id} has missing player ${report.playerId}`);
+      if (!this.organizations.has(report.organizationId)) {
+        issues.push(`Scouting report ${report.id} has missing organization ${report.organizationId}`);
+      }
+      if (scout && scout.organizationId !== report.organizationId) {
+        issues.push(`Scouting report ${report.id} organization does not match scout organization`);
+      }
+      this.validateRating(report.estimatedCA, `Scouting report ${report.id} estimatedCA`, issues);
+      this.validateRating(report.estimatedPARange.low, `Scouting report ${report.id} estimatedPA low`, issues);
+      this.validateRating(report.estimatedPARange.high, `Scouting report ${report.id} estimatedPA high`, issues);
+      if (report.estimatedPARange.low > report.estimatedPARange.high) {
+        issues.push(`Scouting report ${report.id} estimated PA range is inverted`);
+      }
+      this.validateRating(report.confidence, `Scouting report ${report.id} confidence`, issues);
+      this.validateRating(report.overallGrade, `Scouting report ${report.id} overallGrade`, issues);
+      if (!["WATCH", "FOLLOW", "DRAFT", "AVOID"].includes(report.recommendation)) {
+        issues.push(`Scouting report ${report.id} has invalid recommendation ${report.recommendation}`);
+      }
+      if ("trueCurrentAbility" in report || "truePotentialAbility" in report) {
+        issues.push(`Scouting report ${report.id} must not store true ability fields`);
+      }
+      for (const [key, value] of Object.entries(report.attributeEstimates.battingRatings)) {
+        this.validateRating(value, `Scouting report ${report.id} batting ${key}`, issues);
+      }
+      for (const [key, value] of Object.entries(report.attributeEstimates.pitchingRatings)) {
+        if (key === "repertoire") continue;
+        this.validateRating(value, `Scouting report ${report.id} pitching ${key}`, issues);
+      }
+      for (const pitch of report.attributeEstimates.pitchingRatings.repertoire) {
+        if (!pitch.name) issues.push(`Scouting report ${report.id} has a pitch estimate without a name`);
+        this.validateRating(pitch.quality, `Scouting report ${report.id} pitch ${pitch.name}`, issues);
+      }
+    }
+
+    for (const draft of this.drafts.values()) {
+      const season = this.seasons.get(draft.seasonId);
+      if (!season) {
+        issues.push(`Draft ${draft.id} has missing season ${draft.seasonId}`);
+      } else if (season.leagueId !== draft.leagueId) {
+        issues.push(`Draft ${draft.id} league does not match season`);
+      }
+      if (!this.leagues.has(draft.leagueId)) issues.push(`Draft ${draft.id} has missing league ${draft.leagueId}`);
+      if (!Number.isInteger(draft.rounds) || draft.rounds <= 0) issues.push(`Draft ${draft.id} has invalid rounds`);
+      if (!["SCHEDULED", "IN_PROGRESS", "COMPLETED"].includes(draft.status)) {
+        issues.push(`Draft ${draft.id} has invalid status ${draft.status}`);
+      }
+      for (const organizationId of draft.participatingOrganizationIds) {
+        if (!this.organizations.has(organizationId)) {
+          issues.push(`Draft ${draft.id} has missing participating organization ${organizationId}`);
+        }
+      }
+      for (const organizationId of draft.draftOrder) {
+        if (!draft.participatingOrganizationIds.includes(organizationId)) {
+          issues.push(`Draft ${draft.id} order includes non-participating organization ${organizationId}`);
+        }
+      }
+      if (draft.picks.length !== draft.rounds * draft.draftOrder.length) {
+        issues.push(`Draft ${draft.id} pick count does not match rounds and order`);
+      }
+      const selectedPlayers = new Set<EntityId>();
+      for (let index = 0; index < draft.picks.length; index += 1) {
+        const pick = draft.picks[index]!;
+        if (pick.draftId !== draft.id) issues.push(`Draft pick ${pick.id} points to draft ${pick.draftId}, expected ${draft.id}`);
+        if (pick.overallPick !== index + 1) issues.push(`Draft pick ${pick.id} overallPick is inconsistent`);
+        if (pick.round !== Math.floor(index / draft.draftOrder.length) + 1) {
+          issues.push(`Draft pick ${pick.id} round is inconsistent`);
+        }
+        if (pick.organizationId !== draft.draftOrder[index % draft.draftOrder.length]) {
+          issues.push(`Draft pick ${pick.id} organization does not match draft order`);
+        }
+        if (!this.organizations.has(pick.organizationId)) {
+          issues.push(`Draft pick ${pick.id} has missing organization ${pick.organizationId}`);
+        }
+        if (!["UNSELECTED", "DRAFTED", "SIGNED", "UNSIGNED"].includes(pick.status)) {
+          issues.push(`Draft pick ${pick.id} has invalid status ${pick.status}`);
+        }
+        if (pick.playerId) {
+          const player = this.players.get(pick.playerId);
+          if (!player) {
+            issues.push(`Draft pick ${pick.id} has missing player ${pick.playerId}`);
+          } else if (
+            !player.draftEligibility?.eligible ||
+            player.draftEligibility.draftLeagueId !== draft.leagueId ||
+            player.draftEligibility.draftYear !== draft.year
+          ) {
+            issues.push(`Draft pick ${pick.id} selected an ineligible player ${pick.playerId}`);
+          }
+          if (selectedPlayers.has(pick.playerId)) {
+            issues.push(`Draft ${draft.id} selected player ${pick.playerId} more than once`);
+          }
+          selectedPlayers.add(pick.playerId);
+        }
+      }
     }
   }
 
@@ -2722,6 +3141,192 @@ export class LeagueWorld {
     return Math.round(value * 1000) / 1000;
   }
 
+  private scoutingError(skill: number, priorCount: number): number {
+    const maxError = Math.max(2, Math.round(30 - skill * 0.22 - priorCount * 4));
+    return this.rng.int(-maxError, maxError);
+  }
+
+  private estimateAttributes(
+    player: Player,
+    skill: number,
+    priorCount: number,
+  ): ScoutingAttributeEstimates {
+    const estimateRating = (value: number): number => this.clampRating(value + this.scoutingError(skill, priorCount));
+    return {
+      battingRatings: {
+        contact: estimateRating(player.battingRatings.contact),
+        power: estimateRating(player.battingRatings.power),
+        plateDiscipline: estimateRating(player.battingRatings.plateDiscipline),
+        speed: estimateRating(player.battingRatings.speed),
+        fielding: estimateRating(player.battingRatings.fielding),
+        arm: estimateRating(player.battingRatings.arm),
+      },
+      pitchingRatings: {
+        velocity: estimateRating(player.pitchingRatings.velocity),
+        control: estimateRating(player.pitchingRatings.control),
+        movement: estimateRating(player.pitchingRatings.movement),
+        stamina: estimateRating(player.pitchingRatings.stamina),
+        pitchQuality: estimateRating(player.pitchingRatings.pitchQuality),
+        repertoire: player.pitchingRatings.repertoire.map((pitch) => ({
+          name: pitch.name,
+          quality: estimateRating(pitch.quality),
+        })),
+      },
+    };
+  }
+
+  private scoutingRecommendation(
+    estimatedCA: number,
+    estimatedPARange: { low: number; high: number },
+    confidence: number,
+  ): ScoutingRecommendation {
+    const estimatedPA = (estimatedPARange.low + estimatedPARange.high) / 2;
+    if (confidence < 35) return "WATCH";
+    if (estimatedPA >= 70 || (estimatedCA >= 55 && estimatedPA >= 60)) return "DRAFT";
+    if (estimatedPA >= 50 || estimatedCA >= 45) return "FOLLOW";
+    return "AVOID";
+  }
+
+  private isProspectCandidate(player: Player): boolean {
+    return (
+      player.status !== "RETIRED" &&
+      player.status !== "PROFESSIONAL" &&
+      ["STUDENT", "AMATEUR", "INDEPENDENT", "FREE_AGENT"].includes(player.status)
+    );
+  }
+
+  private latestScoutingReport(playerId: EntityId, organizationId?: EntityId): ScoutingReport | undefined {
+    return [...this.scoutingReports.values()]
+      .filter((report) => report.playerId === playerId && (!organizationId || report.organizationId === organizationId))
+      .sort((a, b) => b.observedOn.localeCompare(a.observedOn) || b.confidence - a.confidence || b.id.localeCompare(a.id))[0];
+  }
+
+  private publicProspectEstimate(player: Player, kind: "CA" | "PA"): number {
+    const base = kind === "CA" ? player.currentAbility : player.potentialAbility;
+    return this.clampRating(base + this.rng.int(-12, 12));
+  }
+
+  private positionScarcityBonus(position: string, organizationId?: EntityId): number {
+    if (!organizationId) return 0;
+    const depth = [...this.players.values()].filter(
+      (player) => player.currentOrganizationId === organizationId && player.primaryPosition === position,
+    ).length;
+    return Math.max(0, 6 - depth) * 1.2;
+  }
+
+  private chooseDraftDecision(player: Player): DraftDecision {
+    const talentSignal = player.trueCurrentAbility * 0.35 + player.truePotentialAbility * 0.65;
+    const declareWeight = Math.max(2, talentSignal - 28 + (player.age >= 18 ? 12 : 0));
+    const stayWeight = Math.max(1, 42 - player.age + (player.status === "STUDENT" ? 14 : 4));
+    const abroadWeight = Math.max(1, (talentSignal - 62) * 0.35);
+    const independentWeight = Math.max(1, 35 - talentSignal + (player.age >= 21 ? 10 : 0));
+    const stopWeight = Math.max(1, 25 - talentSignal + (player.injury.status === "HEALTHY" ? 0 : 10));
+    const total = declareWeight + stayWeight + abroadWeight + independentWeight + stopWeight;
+    let roll = this.rng.next() * total;
+    const weighted: [DraftDecision, number][] = [
+      ["DECLARE", declareWeight],
+      ["STAY_SCHOOL", stayWeight],
+      ["GO_ABROAD", abroadWeight],
+      ["INDEPENDENT", independentWeight],
+      ["STOP_PLAYING", stopWeight],
+    ];
+    for (const [decision, weight] of weighted) {
+      roll -= weight;
+      if (roll <= 0) return decision;
+    }
+    return "DECLARE";
+  }
+
+  private draftDecisionReason(decision: DraftDecision): string {
+    if (decision === "DECLARE") return "드래프트 참가 선언";
+    if (decision === "STAY_SCHOOL") return "학교 또는 대학 잔류 선택";
+    if (decision === "GO_ABROAD") return "해외 진학 가능성 선택";
+    if (decision === "INDEPENDENT") return "사회인/독립리그 진로 선택";
+    return "야구 지속 중단 고려";
+  }
+
+  private defaultDraftOrder(seasonId: EntityId): EntityId[] {
+    const standings = this.getStandings(seasonId);
+    const orderedTeamIds = standings.length > 0
+      ? [...standings].reverse().map((record) => record.teamId)
+      : [...this.competitions.values()].find((competition) => competition.seasonId === seasonId)?.participatingTeamIds ?? [];
+    const order: EntityId[] = [];
+    for (const teamId of orderedTeamIds) {
+      const organizationId = this.requireTeam(teamId).organizationId;
+      if (organizationId && !order.includes(organizationId)) order.push(organizationId);
+    }
+    return order;
+  }
+
+  private assertPlayerDraftEligible(player: Player, draft: Draft): void {
+    const eligibility = player.draftEligibility;
+    if (
+      !eligibility?.eligible ||
+      !eligibility.declared ||
+      eligibility.status !== "DECLARED" ||
+      eligibility.draftLeagueId !== draft.leagueId ||
+      eligibility.draftYear !== draft.year
+    ) {
+      throw new Error(`Player is not eligible and declared for draft: ${player.id}`);
+    }
+  }
+
+  private nextDraftPick(draft: Draft, organizationId: EntityId): DraftPick | undefined {
+    return draft.picks.find((pick) => !pick.playerId && pick.organizationId === organizationId);
+  }
+
+  private draftBoardScore(player: Player, organizationId: EntityId): number {
+    const report = this.latestScoutingReport(player.id, organizationId) ?? this.latestScoutingReport(player.id);
+    const estimatedCA = report?.estimatedCA ?? this.publicProspectEstimate(player, "CA");
+    const estimatedPARange = report?.estimatedPARange ?? {
+      low: this.clampRating(this.publicProspectEstimate(player, "PA") - 20),
+      high: this.clampRating(this.publicProspectEstimate(player, "PA") + 20),
+    };
+    const estimatedPA = (estimatedPARange.low + estimatedPARange.high) / 2;
+    const need = this.positionScarcityBonus(player.primaryPosition, organizationId);
+    return (
+      estimatedPA * 0.52 +
+      estimatedCA * 0.3 +
+      (report?.confidence ?? 12) * 0.08 +
+      need -
+      Math.max(0, player.age - 18) * 1.3 +
+      this.rng.next() * 0.001
+    );
+  }
+
+  private recordDraftCareerEntry(player: Player, draft: Draft, pick: DraftPick): void {
+    const organization = this.requireOrganization(pick.organizationId);
+    player.careerEntries.push({
+      id: this.ids.nextId("career"),
+      personId: player.id,
+      personType: "PLAYER",
+      organizationNameSnapshot: organization.name,
+      role: "DRAFT_PICK",
+      status: "DRAFTED",
+      startDate: this.clock.now(),
+      endDate: this.clock.now(),
+      reason: `Draft ${draft.year} round ${pick.round} pick ${pick.overallPick}`,
+    });
+  }
+
+  private completeDraft(draft: Draft): void {
+    draft.status = "COMPLETED";
+    for (const player of this.getAvailableDraftPlayers(draft.id)) {
+      const stored = this.requirePlayer(player.id);
+      stored.draftEligibility = {
+        ...stored.draftEligibility!,
+        status: "UNDRAFTED",
+        declared: true,
+        reason: "드래프트 미지명",
+      };
+      this.record("PLAYER_UNDRAFTED", {
+        subjectId: stored.id,
+        reason: "드래프트 미지명",
+        payload: { draftId: draft.id, draftLeagueId: draft.leagueId, draftYear: draft.year },
+      });
+    }
+  }
+
   private isDerivedStatKey(key: string): boolean {
     return [
       "average",
@@ -3477,6 +4082,7 @@ export class LeagueWorld {
 
   private applyAbilityDelta(player: Player, delta: number): void {
     player.currentAbility = this.clampRating(player.currentAbility + delta);
+    player.trueCurrentAbility = this.clampRating(player.trueCurrentAbility + delta);
     const ratingDelta = Math.sign(delta) * Math.min(Math.abs(delta), 3);
     for (const key of ["contact", "power", "plateDiscipline", "speed", "fielding", "arm"] as const) {
       player.battingRatings[key] = this.clampRating(player.battingRatings[key] + ratingDelta);
@@ -3637,6 +4243,8 @@ export class LeagueWorld {
   private normalizePlayerInput(player: PlayerInput): Player {
     const currentAbility = this.clampRating(player.currentAbility);
     const potentialAbility = this.clampRating(player.potentialAbility);
+    const trueCurrentAbility = this.clampRating(player.trueCurrentAbility ?? currentAbility);
+    const truePotentialAbility = this.clampRating(player.truePotentialAbility ?? potentialAbility);
     const normalized: Player = {
       ...structuredClone(player),
       age: player.age ?? this.calculateAge(player.birthDate),
@@ -3644,6 +4252,8 @@ export class LeagueWorld {
       bats: player.bats ?? "R",
       throws: player.throws ?? "R",
       secondaryPositions: structuredClone(player.secondaryPositions ?? []),
+      trueCurrentAbility,
+      truePotentialAbility,
       currentAbility,
       potentialAbility,
       battingRatings: this.normalizeBattingRatings(player.battingRatings, currentAbility),
@@ -3658,6 +4268,7 @@ export class LeagueWorld {
       rosterAssignments: structuredClone(player.rosterAssignments ?? []),
       contracts: structuredClone(player.contracts ?? []),
       careerEntries: structuredClone(player.careerEntries ?? []),
+      ...(player.draftEligibility ? { draftEligibility: structuredClone(player.draftEligibility) } : {}),
     };
     normalized.age = this.calculateAge(normalized.birthDate);
     return normalized;
@@ -3959,8 +4570,13 @@ export class LeagueWorld {
     }
     this.validateRating(player.currentAbility, `Player ${player.id} currentAbility`, issues);
     this.validateRating(player.potentialAbility, `Player ${player.id} potentialAbility`, issues);
+    this.validateRating(player.trueCurrentAbility, `Player ${player.id} trueCurrentAbility`, issues);
+    this.validateRating(player.truePotentialAbility, `Player ${player.id} truePotentialAbility`, issues);
     if (player.potentialAbility < 1) {
       issues.push(`Player ${player.id} potentialAbility must be at least 1`);
+    }
+    if (player.truePotentialAbility < 1) {
+      issues.push(`Player ${player.id} truePotentialAbility must be at least 1`);
     }
     for (const [key, value] of Object.entries(player.battingRatings)) {
       this.validateRating(value, `Player ${player.id} batting ${key}`, issues);
@@ -3998,6 +4614,25 @@ export class LeagueWorld {
     }
     if (player.weightKg !== undefined && (player.weightKg < 35 || player.weightKg > 180)) {
       issues.push(`Player ${player.id} weightKg is outside expected bounds`);
+    }
+
+    if (player.draftEligibility) {
+      if (!this.leagues.has(player.draftEligibility.draftLeagueId)) {
+        issues.push(`Player ${player.id} draftEligibility has missing league ${player.draftEligibility.draftLeagueId}`);
+      }
+      if (!Number.isInteger(player.draftEligibility.draftYear) || player.draftEligibility.draftYear < 1900) {
+        issues.push(`Player ${player.id} draftEligibility has invalid draftYear`);
+      }
+      if (player.draftEligibility.declared && !player.draftEligibility.eligible) {
+        issues.push(`Player ${player.id} draftEligibility is declared while not eligible`);
+      }
+      if (
+        !["NOT_ELIGIBLE", "ELIGIBLE", "DECLARED", "DRAFTED", "UNDRAFTED", "WITHDREW"].includes(
+          player.draftEligibility.status,
+        )
+      ) {
+        issues.push(`Player ${player.id} draftEligibility has invalid status ${player.draftEligibility.status}`);
+      }
     }
 
     if (player.injury.status === "HEALTHY") return;
@@ -4212,6 +4847,18 @@ export class LeagueWorld {
   private requireOrganization(id: EntityId): Organization {
     const value = this.organizations.get(id);
     if (!value) throw new Error(`Organization not found: ${id}`);
+    return value;
+  }
+
+  private requireScout(id: EntityId): Scout {
+    const value = this.scouts.get(id);
+    if (!value) throw new Error(`Scout not found: ${id}`);
+    return value;
+  }
+
+  private requireDraft(id: EntityId): Draft {
+    const value = this.drafts.get(id);
+    if (!value) throw new Error(`Draft not found: ${id}`);
     return value;
   }
 

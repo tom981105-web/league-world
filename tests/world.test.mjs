@@ -2534,3 +2534,285 @@ test("substitution invariants catch invalid local mutations", () => {
   assert.ok(issues.some((issue) => issue.includes("multiple defensive positions")));
   assert.ok(issues.some((issue) => issue.includes("strategy bullpenAggression")));
 });
+
+function addScout(world, id, organizationId, grade) {
+  return world.addScout({
+    id,
+    name: `${id} Scout`,
+    organizationId,
+    abilityEvaluation: grade,
+    potentialEvaluation: grade,
+    regionalKnowledge: grade,
+    experience: grade,
+  });
+}
+
+function addDraftProspect(world, id, overrides = {}) {
+  world.addPlayer(createPlayer({
+    id,
+    name: `${id} Prospect`,
+    status: "AMATEUR",
+    birthDate: "2009-03-01",
+    currentAbility: 42,
+    potentialAbility: 78,
+    trueCurrentAbility: overrides.trueCurrentAbility ?? overrides.currentAbility ?? 42,
+    truePotentialAbility: overrides.truePotentialAbility ?? overrides.potentialAbility ?? 78,
+    ...overrides,
+  }));
+  return world.players.get(id);
+}
+
+function declareForDraft(world, playerId, leagueId = "league_kr1", year = 2027) {
+  const eligibility = world.evaluateDraftEligibility(playerId, leagueId, year);
+  world.players.get(playerId).draftEligibility = {
+    ...eligibility,
+    declared: true,
+    status: "DECLARED",
+    decision: "DECLARE",
+    reason: "테스트 드래프트 참가 선언",
+  };
+}
+
+function createDraftSeason(world) {
+  const { season, competition } = createRegularSeason(world, {
+    id: "season_draft_2027",
+    name: "2027 Draft Season",
+  });
+  return { season, competition };
+}
+
+test("scout quality changes estimate accuracy while true and estimated ability stay separate", () => {
+  const world = createWorld(9101);
+  addDraftProspect(world, "prospect_accuracy", {
+    trueCurrentAbility: 58,
+    truePotentialAbility: 92,
+    currentAbility: 40,
+    potentialAbility: 70,
+  });
+  const low = addScout(world, "scout_low", "org_seoul", 10);
+  const high = addScout(world, "scout_high", "org_busan", 95);
+
+  const lowReport = world.createScoutingReport(low.id, "prospect_accuracy");
+  const highReport = world.createScoutingReport(high.id, "prospect_accuracy");
+  const player = world.players.get("prospect_accuracy");
+  const lowError = Math.abs(lowReport.estimatedCA - player.trueCurrentAbility);
+  const highError = Math.abs(highReport.estimatedCA - player.trueCurrentAbility);
+  const highMid = (highReport.estimatedPARange.low + highReport.estimatedPARange.high) / 2;
+
+  assert.ok(highError <= lowError);
+  assert.notEqual(highMid, player.truePotentialAbility);
+  assert.equal("truePotentialAbility" in highReport, false);
+});
+
+test("repeated scouting increases confidence and narrows potential range", () => {
+  const world = createWorld(9102);
+  addDraftProspect(world, "prospect_repeat", { truePotentialAbility: 55 });
+  const scout = addScout(world, "scout_repeat", "org_seoul", 70);
+
+  const first = world.createScoutingReport(scout.id, "prospect_repeat");
+  const second = world.createScoutingReport(scout.id, "prospect_repeat");
+  const width = (report) => report.estimatedPARange.high - report.estimatedPARange.low;
+
+  assert.ok(second.confidence > first.confidence);
+  assert.ok(width(second) < width(first));
+});
+
+test("scouting and AI draft decisions are reproducible with the same seed", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    const { season } = createDraftSeason(world);
+    addScout(world, "scout_seed", "org_seoul", 72);
+    for (const id of ["seed_a", "seed_b", "seed_c"]) {
+      addDraftProspect(world, id, { truePotentialAbility: id === "seed_b" ? 90 : 70 });
+      declareForDraft(world, id);
+      world.createScoutingReport("scout_seed", id);
+    }
+    const draft = world.createDraft({
+      id: "draft_seed",
+      leagueId: "league_kr1",
+      seasonId: season.id,
+      year: 2027,
+      rounds: 1,
+      draftOrder: ["org_seoul", "org_busan"],
+    });
+    const pick = world.autoDraftPick(draft.id, "org_seoul");
+    return {
+      reports: [...world.scoutingReports.values()],
+      pick,
+    };
+  }
+
+  assert.deepEqual(run(9103), run(9103));
+});
+
+test("prospect rankings use scouting view and support position filters", () => {
+  const world = createWorld(9104);
+  addScout(world, "scout_rank", "org_seoul", 75);
+  addDraftProspect(world, "rank_ss", { primaryPosition: "SS", truePotentialAbility: 86 });
+  addDraftProspect(world, "rank_c", { primaryPosition: "C", truePotentialAbility: 78 });
+  addDraftProspect(world, "rank_p", { primaryPosition: "P", truePotentialAbility: 90 });
+  for (const id of ["rank_ss", "rank_c", "rank_p"]) {
+    declareForDraft(world, id);
+    world.createScoutingReport("scout_rank", id);
+  }
+
+  const all = world.getProspectRankings({ organizationId: "org_seoul", limit: 3 });
+  const catchers = world.getProspectRankings({ organizationId: "org_seoul", positions: ["C"] });
+
+  assert.deepEqual(all.map((entry) => entry.rank), [1, 2, 3]);
+  assert.equal(catchers.length, 1);
+  assert.equal(catchers[0].playerId, "rank_c");
+});
+
+test("draft eligibility and declaration can branch away from automatic entry", () => {
+  const world = createWorld(1);
+  addDraftProspect(world, "eligible_player", { birthDate: "2009-03-01" });
+  addDraftProspect(world, "too_young_player", { birthDate: "2015-03-01" });
+  addDraftProspect(world, "declaration_star", {
+    birthDate: "2007-01-01",
+    trueCurrentAbility: 80,
+    truePotentialAbility: 95,
+  });
+
+  const eligible = world.evaluateDraftEligibility("eligible_player", "league_kr1", 2027);
+  const tooYoung = world.evaluateDraftEligibility("too_young_player", "league_kr1", 2027);
+  const decision = world.decideDraftDeclaration("eligible_player", "league_kr1", 2027);
+  const declared = world.decideDraftDeclaration("declaration_star", "league_kr1", 2027);
+
+  assert.equal(eligible.eligible, true);
+  assert.equal(tooYoung.eligible, false);
+  assert.equal(typeof decision.declared, "boolean");
+  assert.ok(["DECLARE", "STAY_SCHOOL", "GO_ABROAD", "INDEPENDENT", "STOP_PLAYING"].includes(decision.decision));
+  assert.equal(declared.status, "DECLARED");
+  assert.ok(world.events.some((event) => event.type === "DRAFT_DECLARED" && event.subjectId === "declaration_star"));
+});
+
+test("draft order defaults to reverse standings", () => {
+  const world = createWorld();
+  const { season, competition } = createDraftSeason(world);
+  world.scheduleGame({
+    id: "draft_order_game",
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-01-03",
+  });
+  world.completeGame("draft_order_game", { homeScore: 8, awayScore: 1 });
+
+  const draft = world.createDraft({
+    id: "draft_reverse",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 1,
+  });
+
+  assert.deepEqual(draft.draftOrder, ["org_busan", "org_seoul"]);
+});
+
+test("manual and AI draft picks support multiple rounds and block duplicate selections", () => {
+  const world = createWorld(9106);
+  const { season } = createDraftSeason(world);
+  addScout(world, "scout_manual", "org_seoul", 85);
+  addScout(world, "scout_ai", "org_busan", 65);
+  for (const [id, pa] of [["draft_a", 88], ["draft_b", 82], ["draft_c", 72]]) {
+    addDraftProspect(world, id, { truePotentialAbility: pa });
+    declareForDraft(world, id);
+    world.createScoutingReport("scout_manual", id);
+    world.createScoutingReport("scout_ai", id);
+  }
+  const draft = world.createDraft({
+    id: "draft_multi",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 2,
+    draftOrder: ["org_seoul", "org_busan"],
+  });
+
+  const manual = world.makeDraftPick(draft.id, "org_seoul", "draft_a");
+  assert.equal(manual.round, 1);
+  assert.throws(() => world.makeDraftPick(draft.id, "org_busan", "draft_a"), /already selected/);
+  const ai = world.autoDraftPick(draft.id, "org_busan");
+  assert.equal(ai.round, 1);
+  assert.equal(world.drafts.get(draft.id).picks.length, 4);
+});
+
+test("runDraft marks drafted and undrafted players without signing contracts", () => {
+  const world = createWorld(9107);
+  const { season } = createDraftSeason(world);
+  addScout(world, "scout_run", "org_seoul", 80);
+  for (const id of ["run_a", "run_b", "run_c"]) {
+    addDraftProspect(world, id, { truePotentialAbility: id === "run_a" ? 92 : 60 });
+    declareForDraft(world, id);
+    world.createScoutingReport("scout_run", id);
+  }
+  const draft = world.createDraft({
+    id: "draft_run",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 1,
+    draftOrder: ["org_seoul", "org_busan"],
+  });
+
+  const completed = world.runDraft(draft.id);
+  const draftedIds = completed.picks.flatMap((pick) => pick.playerId ? [pick.playerId] : []);
+  const undrafted = ["run_a", "run_b", "run_c"].find((id) => !draftedIds.includes(id));
+
+  assert.equal(completed.status, "COMPLETED");
+  assert.equal(draftedIds.length, 2);
+  assert.equal(world.players.get(draftedIds[0]).draftEligibility.status, "DRAFTED");
+  assert.equal(world.players.get(undrafted).draftEligibility.status, "UNDRAFTED");
+  assert.equal(world.players.get(draftedIds[0]).contracts.length, 0);
+  assert.ok(world.players.get(draftedIds[0]).careerEntries.some((entry) => entry.status === "DRAFTED" && entry.endDate));
+  assert.ok(world.events.some((event) => event.type === "PLAYER_DRAFTED"));
+  assert.ok(world.events.some((event) => event.type === "PLAYER_UNDRAFTED"));
+});
+
+test("draft commands reject ineligible players, missing organizations, and completed drafts", () => {
+  const world = createWorld();
+  const { season } = createDraftSeason(world);
+  addDraftProspect(world, "draft_invalid");
+  const draft = world.createDraft({
+    id: "draft_invalid",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 1,
+    draftOrder: ["org_seoul"],
+  });
+
+  assert.throws(() => world.makeDraftPick(draft.id, "org_seoul", "draft_invalid"), /not eligible/);
+  declareForDraft(world, "draft_invalid");
+  assert.throws(() => world.makeDraftPick(draft.id, "org_missing", "draft_invalid"), /Organization not found/);
+  world.runDraft(draft.id);
+  assert.throws(() => world.makeDraftPick(draft.id, "org_seoul", "draft_invalid"), /Completed draft/);
+});
+
+test("scouting and draft invariants catch corrupted local state", () => {
+  const world = createWorld();
+  const { season } = createDraftSeason(world);
+  addDraftProspect(world, "bad_report_player");
+  declareForDraft(world, "bad_report_player");
+  addScout(world, "bad_scout", "org_seoul", 50);
+  const report = world.createScoutingReport("bad_scout", "bad_report_player");
+  const draft = world.createDraft({
+    id: "bad_draft",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 1,
+    draftOrder: ["org_seoul"],
+  });
+  world.scoutingReports.get(report.id).estimatedPARange.low = 90;
+  world.scoutingReports.get(report.id).estimatedPARange.high = 40;
+  world.drafts.get(draft.id).picks[0].overallPick = 2;
+  world.drafts.get(draft.id).picks[0].playerId = "missing_player";
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("estimated PA range is inverted")));
+  assert.ok(issues.some((issue) => issue.includes("overallPick is inconsistent")));
+  assert.ok(issues.some((issue) => issue.includes("missing player")));
+});

@@ -6,6 +6,10 @@ import type {
   BullpenRole,
   ContractStatus,
   CompetitionType,
+  DraftDecision,
+  DraftEligibilityStatus,
+  DraftPickStatus,
+  DraftStatus,
   GameActionType,
   GameStatus,
   GameHalf,
@@ -20,6 +24,7 @@ import type {
   PitchingLeaderCategory,
   PlayerStatus,
   RosterStatus,
+  ScoutingRecommendation,
   SeasonStatus,
   TeamType,
   ThrowingHand,
@@ -84,6 +89,8 @@ export interface Player {
   heightCm?: number;
   weightKg?: number;
   status: PlayerStatus;
+  trueCurrentAbility: number;
+  truePotentialAbility: number;
   currentAbility: number;
   potentialAbility: number;
   battingRatings: BattingRatings;
@@ -97,9 +104,89 @@ export interface Player {
   rosterStatus?: RosterStatus;
   firstProfessionalDate?: ISODate;
   firstTopLevelAppearanceDate?: ISODate;
+  draftEligibility?: DraftEligibility;
   rosterAssignments: RosterAssignment[];
   contracts: PlayerContract[];
   careerEntries: CareerEntry[];
+}
+
+export interface Scout {
+  id: EntityId;
+  name: string;
+  organizationId: EntityId;
+  abilityEvaluation: number;
+  potentialEvaluation: number;
+  regionalKnowledge: number;
+  experience: number;
+}
+
+export interface EstimatedPotentialRange {
+  low: number;
+  high: number;
+}
+
+export interface ScoutingAttributeEstimates {
+  battingRatings: BattingRatings;
+  pitchingRatings: PitchingRatings;
+}
+
+export interface ScoutingReport {
+  id: EntityId;
+  scoutId: EntityId;
+  playerId: EntityId;
+  organizationId: EntityId;
+  observedOn: ISODate;
+  estimatedCA: number;
+  estimatedPARange: EstimatedPotentialRange;
+  attributeEstimates: ScoutingAttributeEstimates;
+  confidence: number;
+  overallGrade: number;
+  recommendation: ScoutingRecommendation;
+}
+
+export interface ProspectRankingEntry {
+  rank: number;
+  playerId: EntityId;
+  reportId?: EntityId;
+  score: number;
+  estimatedCA: number;
+  estimatedPARange: EstimatedPotentialRange;
+  confidence: number;
+  age: number;
+  primaryPosition: string;
+}
+
+export interface DraftEligibility {
+  eligible: boolean;
+  declared: boolean;
+  draftYear: number;
+  draftLeagueId: EntityId;
+  reason: string;
+  status: DraftEligibilityStatus;
+  decision?: DraftDecision;
+}
+
+export interface Draft {
+  id: EntityId;
+  leagueId: EntityId;
+  seasonId: EntityId;
+  year: number;
+  rounds: number;
+  status: DraftStatus;
+  participatingOrganizationIds: EntityId[];
+  draftOrder: EntityId[];
+  picks: DraftPick[];
+}
+
+export interface DraftPick {
+  id: EntityId;
+  draftId: EntityId;
+  round: number;
+  overallPick: number;
+  organizationId: EntityId;
+  playerId?: EntityId;
+  selectedAt?: ISODate;
+  status: DraftPickStatus;
 }
 
 export interface RosterAssignment {

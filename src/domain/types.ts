@@ -77,6 +77,27 @@ export type BattingLeaderCategory = "AVG" | "HR" | "RBI" | "H" | "OPS";
 
 export type PitchingLeaderCategory = "ERA" | "W" | "SO" | "SV" | "WHIP";
 
+export type ScoutingRecommendation = "WATCH" | "FOLLOW" | "DRAFT" | "AVOID";
+
+export type DraftEligibilityStatus =
+  | "NOT_ELIGIBLE"
+  | "ELIGIBLE"
+  | "DECLARED"
+  | "DRAFTED"
+  | "UNDRAFTED"
+  | "WITHDREW";
+
+export type DraftDecision =
+  | "DECLARE"
+  | "STAY_SCHOOL"
+  | "GO_ABROAD"
+  | "INDEPENDENT"
+  | "STOP_PLAYING";
+
+export type DraftStatus = "SCHEDULED" | "IN_PROGRESS" | "COMPLETED";
+
+export type DraftPickStatus = "UNSELECTED" | "DRAFTED" | "SIGNED" | "UNSIGNED";
+
 export type GameActionType =
   | "PITCHING_CHANGE"
   | "PINCH_HITTER"
@@ -120,6 +141,9 @@ export type WorldEventType =
   | "LINEUP_SET"
   | "STARTING_PITCHER_SET"
   | "PLAYER_MILESTONE"
+  | "DRAFT_DECLARED"
+  | "PLAYER_DRAFTED"
+  | "PLAYER_UNDRAFTED"
   | "SEASON_STARTED"
   | "SEASON_ENDED"
   | "GAME_PLAYED";
