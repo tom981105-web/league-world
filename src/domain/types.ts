@@ -13,6 +13,8 @@ export type ManagerStatus = "EMPLOYED" | "UNEMPLOYED" | "RETIRED";
 
 export type TeamType = "CLUB" | "SCHOOL" | "NATIONAL";
 
+export type PersonType = "PLAYER" | "MANAGER";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"

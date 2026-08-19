@@ -3,6 +3,7 @@ import type {
   ISODate,
   LeagueCategory,
   ManagerStatus,
+  PersonType,
   PlayerStatus,
   TeamType,
   WorldEventType,
@@ -40,6 +41,7 @@ export interface Player {
   currentAbility: number;
   potentialAbility: number;
   currentTeamId?: EntityId;
+  careerEntries: CareerEntry[];
 }
 
 export interface Manager {
@@ -50,6 +52,20 @@ export interface Manager {
   status: ManagerStatus;
   reputation: number;
   currentTeamId?: EntityId;
+  careerEntries: CareerEntry[];
+}
+
+export interface CareerEntry {
+  id: EntityId;
+  personId: EntityId;
+  personType: PersonType;
+  teamId?: EntityId;
+  organizationNameSnapshot: string;
+  role: string;
+  status: string;
+  startDate: ISODate;
+  endDate?: ISODate;
+  reason: string;
 }
 
 export interface WorldEvent {
