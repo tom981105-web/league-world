@@ -6,6 +6,8 @@ import type {
   BatterGameLine,
   BattingLeaderboardEntry,
   Competition,
+  ContractOffer,
+  ContractOfferEvaluation,
   Country,
   Draft,
   DraftEligibility,
@@ -30,8 +32,11 @@ import type {
   PlayerPitchingSeasonStats,
   PlayByPlayEvent,
   PlayerContract,
+  PlayerContractDemand,
   PlayerDevelopmentProfile,
   PlayerInjury,
+  PlayerMarketValue,
+  PostingRequest,
   StartingLineupSlot,
   Player,
   ProspectRankingEntry,
@@ -42,9 +47,12 @@ import type {
   Season,
   StandingRecord,
   Team,
+  TradeEvaluation,
+  TradeProposal,
   WorldEvent,
 } from "../domain/entities.js";
 import type {
+  ContractOfferDecision,
   CompetitionType,
   DraftDecision,
   EntityId,
@@ -59,8 +67,10 @@ import type {
   PlateAppearanceResult,
   PitchingLeaderCategory,
   PersonType,
+  PostingStatus,
   RosterStatus,
   ScoutingRecommendation,
+  TradeAiDecision,
   WorldEventType,
 } from "../domain/types.js";
 import {
@@ -94,6 +104,8 @@ type PlayerInput = Omit<
   | "contracts"
   | "careerEntries"
   | "draftEligibility"
+  | "contractDemand"
+  | "freeAgentStatus"
 > &
   Partial<
     Pick<
@@ -117,10 +129,12 @@ type PlayerInput = Omit<
       | "contracts"
       | "careerEntries"
       | "draftEligibility"
+      | "contractDemand"
+      | "freeAgentStatus"
     >
   >;
 type ManagerInput = Omit<Manager, "careerEntries"> & Partial<Pick<Manager, "careerEntries">>;
-type PlayerContractInput = Omit<PlayerContract, "id"> & Partial<Pick<PlayerContract, "id">>;
+type PlayerContractInput = Omit<PlayerContract, "id" | "years"> & Partial<Pick<PlayerContract, "id" | "years">>;
 type SeasonInput = Omit<Season, "id" | "status" | "allowDraws" | "hasPostseason"> &
   Partial<Pick<Season, "id" | "status" | "allowDraws" | "hasPostseason">>;
 type CompetitionInput = Omit<Competition, "id"> & Partial<Pick<Competition, "id">>;
@@ -134,6 +148,12 @@ type GameDayRosterInput = Omit<
 type ScoutInput = Omit<Scout, "id"> & Partial<Pick<Scout, "id">>;
 type DraftInput = Omit<Draft, "id" | "status" | "participatingOrganizationIds" | "draftOrder" | "picks"> &
   Partial<Pick<Draft, "id" | "status" | "participatingOrganizationIds" | "draftOrder">>;
+type ContractOfferInput = Omit<ContractOffer, "id" | "status" | "offeredOn" | "years" | "reason"> &
+  Partial<Pick<ContractOffer, "id" | "status" | "offeredOn" | "years" | "reason">>;
+type TradeProposalInput = Omit<TradeProposal, "id" | "status" | "proposedOn" | "reason"> &
+  Partial<Pick<TradeProposal, "id" | "status" | "proposedOn" | "reason">>;
+type PostingRequestInput = Omit<PostingRequest, "id" | "requestedOn" | "status" | "reason"> &
+  Partial<Pick<PostingRequest, "id" | "requestedOn" | "status" | "reason">>;
 
 export interface ScoutingReportOptions {
   observedOn?: ISODate;
@@ -196,6 +216,9 @@ export class LeagueWorld {
   readonly scouts = new Map<EntityId, Scout>();
   readonly scoutingReports = new Map<EntityId, ScoutingReport>();
   readonly drafts = new Map<EntityId, Draft>();
+  readonly contractOffers = new Map<EntityId, ContractOffer>();
+  readonly tradeProposals = new Map<EntityId, TradeProposal>();
+  readonly postingRequests = new Map<EntityId, PostingRequest>();
   readonly events: WorldEvent[] = [];
 
   constructor(
@@ -773,6 +796,353 @@ export class LeagueWorld {
     this.completeDraft(draft);
     this.assertInvariants();
     return structuredClone(draft);
+  }
+
+  setPlayerContractDemand(playerId: EntityId, demand: PlayerContractDemand): PlayerContractDemand {
+    const player = this.requirePlayer(playerId);
+    player.contractDemand = this.normalizeContractDemand(demand);
+    this.assertInvariants();
+    return structuredClone(player.contractDemand);
+  }
+
+  makeContractOffer(input: ContractOfferInput): ContractOffer {
+    const player = this.requirePlayer(input.playerId);
+    this.requireOrganization(input.organizationId);
+    if (player.status === "RETIRED") throw new Error(`Retired player cannot receive a contract offer: ${player.id}`);
+    if (input.endDate < input.startDate) throw new Error("Contract offer endDate must be >= startDate");
+    if (!Number.isFinite(input.salary) || input.salary < 0) throw new Error("Contract offer salary must be non-negative");
+    if (input.draftId) {
+      const draft = this.requireDraft(input.draftId);
+      if (!draft.picks.some((pick) => pick.playerId === player.id && pick.organizationId === input.organizationId)) {
+        throw new Error(`Drafted player can only negotiate with drafting organization: ${player.id}`);
+      }
+    } else if (input.postingRequestId) {
+      const posting = this.requirePostingRequest(input.postingRequestId);
+      if (posting.playerId !== player.id || posting.status !== "APPROVED") {
+        throw new Error(`Posting request is not open for this player: ${input.postingRequestId}`);
+      }
+      const targetLeagueIds = new Set(posting.targetLeagueIds);
+      const hasTargetTeam = [...this.teams.values()].some(
+        (team) => team.organizationId === input.organizationId && targetLeagueIds.has(team.leagueId),
+      );
+      if (!hasTargetTeam) throw new Error(`Organization is not in a posting target league: ${input.organizationId}`);
+    } else if (player.currentOrganizationId && player.currentOrganizationId !== input.organizationId) {
+      throw new Error(`Non-free player belongs to another organization: ${player.currentOrganizationId}`);
+    } else if (!player.currentOrganizationId && player.status !== "FREE_AGENT" && player.draftEligibility?.status !== "DRAFTED") {
+      throw new Error(`Player is not a free agent or drafted negotiable player: ${player.id}`);
+    }
+    if (player.status === "FREE_AGENT" && !player.freeAgentStatus?.eligible) {
+      throw new Error(`Free agent status is not eligible: ${player.id}`);
+    }
+
+    const offer: ContractOffer = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("offer"),
+      status: input.status ?? "PENDING",
+      offeredOn: input.offeredOn ?? this.clock.now(),
+      years: input.years ?? this.contractYears(input.startDate, input.endDate),
+      signingBonus: input.signingBonus ?? 0,
+      reason: input.reason ?? "계약 제안",
+    };
+    this.contractOffers.set(offer.id, offer);
+    this.record("CONTRACT_OFFERED", {
+      subjectId: player.id,
+      reason: offer.reason,
+      payload: { offerId: offer.id, organizationId: offer.organizationId, salary: offer.salary, years: offer.years },
+    });
+    this.assertInvariants();
+    return structuredClone(offer);
+  }
+
+  evaluateContractOffer(offerId: EntityId): ContractOfferEvaluation {
+    const offer = this.requireContractOffer(offerId);
+    const player = this.requirePlayer(offer.playerId);
+    const demand = player.contractDemand ?? this.defaultContractDemand(player);
+    const organizationScore = this.organizationOpportunityScore(player, offer.organizationId);
+    const salaryScore = Math.min(150, (offer.salary + (offer.signingBonus ?? 0) / Math.max(1, offer.years)) / Math.max(1, demand.desiredSalary) * 100);
+    const minimumPenalty = offer.salary < demand.minimumSalary || offer.years < demand.minimumYears ? -45 : 0;
+    const yearsScore = Math.min(120, offer.years / Math.max(1, demand.desiredYears) * 100);
+    const preferenceScore = this.contractPreferenceScore(offer, demand);
+    const score = this.roundRate(salaryScore * 0.42 + yearsScore * 0.18 + organizationScore * 0.25 + preferenceScore * 0.15 + minimumPenalty + this.rng.next() * 3);
+    const decision: ContractOfferDecision = score >= 72 ? "ACCEPT" : score < 48 ? "REJECT" : "HOLD";
+    return {
+      offerId,
+      playerId: player.id,
+      organizationId: offer.organizationId,
+      decision,
+      score,
+      reason: decision === "ACCEPT" ? "조건과 기회가 요구에 부합" : decision === "REJECT" ? "요구 조건과 차이가 큼" : "추가 제안 대기",
+    };
+  }
+
+  acceptContractOffer(offerId: EntityId): PlayerContract {
+    const offer = this.requireContractOffer(offerId);
+    if (offer.status !== "PENDING") throw new Error(`Contract offer is not pending: ${offerId}`);
+    const player = this.requirePlayer(offer.playerId);
+    if (player.status === "RETIRED") throw new Error(`Retired player cannot sign a contract: ${player.id}`);
+    if (offer.postingRequestId) {
+      const active = this.activeContract(player);
+      if (active) active.contractStatus = "TERMINATED";
+      this.closeOpenRosterAssignment(player, "포스팅 해외 계약");
+      delete player.currentTeamId;
+      delete player.currentOrganizationId;
+      delete player.rosterStatus;
+    }
+    const contract = this.registerContract({
+      playerId: offer.playerId,
+      organizationId: offer.organizationId,
+      startDate: offer.startDate,
+      endDate: offer.endDate,
+      years: offer.years,
+      salary: offer.salary,
+      currency: offer.currency,
+      ...(offer.signingBonus !== undefined ? { signingBonus: offer.signingBonus } : {}),
+      ...(offer.noTradeClause !== undefined ? { noTradeClause: offer.noTradeClause } : {}),
+      ...(offer.playerOption !== undefined ? { playerOption: offer.playerOption } : {}),
+      ...(offer.teamOption !== undefined ? { teamOption: offer.teamOption } : {}),
+      contractStatus: "ACTIVE",
+    });
+    offer.status = "ACCEPTED";
+    for (const other of this.contractOffers.values()) {
+      if (other.playerId === offer.playerId && other.id !== offer.id && other.status === "PENDING") {
+        other.status = "REJECTED";
+      }
+    }
+    this.markDraftPickSigned(offer);
+    this.completePostingIfNeeded(offer);
+    return contract;
+  }
+
+  rejectContractOffer(offerId: EntityId, reason = "계약 제안 거절"): ContractOffer {
+    const offer = this.requireContractOffer(offerId);
+    if (offer.status !== "PENDING") throw new Error(`Contract offer is not pending: ${offerId}`);
+    offer.status = "REJECTED";
+    if (offer.draftId) {
+      const player = this.requirePlayer(offer.playerId);
+      if (player.draftEligibility?.status === "DRAFTED") {
+        player.draftEligibility.status = "UNSIGNED_DRAFTEE";
+        player.draftEligibility.reason = reason;
+      }
+      const draft = this.requireDraft(offer.draftId);
+      const pick = draft.picks.find((candidate) => candidate.playerId === offer.playerId && candidate.organizationId === offer.organizationId);
+      if (pick) pick.status = "UNSIGNED";
+    }
+    this.record("CONTRACT_REJECTED", {
+      subjectId: offer.playerId,
+      reason,
+      payload: { offerId, organizationId: offer.organizationId },
+    });
+    this.failPostingIfAllOffersRejected(offer);
+    this.assertInvariants();
+    return structuredClone(offer);
+  }
+
+  withdrawContractOffer(offerId: EntityId, reason = "계약 제안 철회"): ContractOffer {
+    const offer = this.requireContractOffer(offerId);
+    if (offer.status !== "PENDING") throw new Error(`Contract offer is not pending: ${offerId}`);
+    offer.status = "WITHDRAWN";
+    this.record("CONTRACT_REJECTED", {
+      subjectId: offer.playerId,
+      reason,
+      payload: { offerId, organizationId: offer.organizationId, withdrawn: true },
+    });
+    this.failPostingIfAllOffersRejected(offer);
+    this.assertInvariants();
+    return structuredClone(offer);
+  }
+
+  chooseBestContractOffer(playerId: EntityId): ContractOfferEvaluation {
+    this.requirePlayer(playerId);
+    const evaluations = [...this.contractOffers.values()]
+      .filter((offer) => offer.playerId === playerId && offer.status === "PENDING")
+      .map((offer) => this.evaluateContractOffer(offer.id))
+      .sort((a, b) => b.score - a.score || a.organizationId.localeCompare(b.organizationId));
+    if (evaluations.length === 0) throw new Error(`No pending offers for player: ${playerId}`);
+    return evaluations[0]!;
+  }
+
+  expireContracts(onDate: ISODate = this.clock.now()): void {
+    for (const player of this.players.values()) {
+      const active = this.activeContract(player);
+      if (!active || active.endDate >= onDate) continue;
+      active.contractStatus = "EXPIRED";
+      const previousOrganizationId = player.currentOrganizationId;
+      this.closeOpenRosterAssignment(player, "계약 만료");
+      delete player.currentTeamId;
+      delete player.currentOrganizationId;
+      player.status = "FREE_AGENT";
+      player.freeAgentStatus = {
+        eligible: true,
+        becameFreeAgentOn: onDate,
+        ...(previousOrganizationId ? { previousOrganizationId } : {}),
+        type: "CONTRACT_EXPIRED",
+      };
+      this.replaceCareerEntry(player, "PLAYER", {
+        role: player.primaryPosition,
+        status: player.status,
+        reason: "계약 만료 FA",
+        organizationNameSnapshot: "Free Agent",
+      });
+      this.record("PLAYER_BECAME_FREE_AGENT", {
+        subjectId: player.id,
+        reason: "계약 만료 FA",
+        payload: { previousOrganizationId, type: "CONTRACT_EXPIRED" },
+      }, onDate);
+    }
+    this.assertInvariants();
+  }
+
+  proposeTrade(input: TradeProposalInput): TradeProposal {
+    this.requireOrganization(input.proposerOrganizationId);
+    this.requireOrganization(input.targetOrganizationId);
+    if (input.proposerOrganizationId === input.targetOrganizationId) throw new Error("Trade organizations must differ");
+    this.assertTradePlayerLists(input.proposerOrganizationId, input.targetOrganizationId, input.playersFromProposer, input.playersFromTarget);
+    const proposal: TradeProposal = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("trade"),
+      status: input.status ?? "PROPOSED",
+      proposedOn: input.proposedOn ?? this.clock.now(),
+      cash: input.cash ?? 0,
+      draftPickIds: structuredClone(input.draftPickIds ?? []),
+      reason: input.reason ?? "트레이드 제안",
+    };
+    this.tradeProposals.set(proposal.id, proposal);
+    this.record("TRADE_PROPOSED", {
+      reason: proposal.reason,
+      payload: { proposalId: proposal.id, proposerOrganizationId: proposal.proposerOrganizationId, targetOrganizationId: proposal.targetOrganizationId },
+    });
+    this.assertInvariants();
+    return structuredClone(proposal);
+  }
+
+  evaluateTradeProposal(proposalId: EntityId, organizationId?: EntityId): TradeEvaluation {
+    const proposal = this.requireTradeProposal(proposalId);
+    const evaluatorId = organizationId ?? proposal.targetOrganizationId;
+    if (evaluatorId !== proposal.proposerOrganizationId && evaluatorId !== proposal.targetOrganizationId) {
+      throw new Error(`Organization is not part of trade: ${evaluatorId}`);
+    }
+    const incoming = evaluatorId === proposal.targetOrganizationId ? proposal.playersFromProposer : proposal.playersFromTarget;
+    const outgoing = evaluatorId === proposal.targetOrganizationId ? proposal.playersFromTarget : proposal.playersFromProposer;
+    const incomingValue = incoming.reduce((sum, playerId) => sum + this.calculatePlayerMarketValue(playerId, evaluatorId).value, 0) + (proposal.cash ?? 0);
+    const outgoingValue = outgoing.reduce((sum, playerId) => sum + this.calculatePlayerMarketValue(playerId, evaluatorId).value, 0);
+    const score = this.roundRate(incomingValue - outgoingValue);
+    if (score >= -5) {
+      return { proposalId, organizationId: evaluatorId, decision: "ACCEPT", score, reason: "교환 가치가 수용 가능" };
+    }
+    if (score >= -22) {
+      const counter = this.buildCounterProposal(proposal, evaluatorId);
+      return { proposalId, organizationId: evaluatorId, decision: "COUNTER", score, reason: "추가 보상이 필요", counterProposal: structuredClone(counter) };
+    }
+    return { proposalId, organizationId: evaluatorId, decision: "REJECT", score, reason: "전력 가치 손실이 큼" };
+  }
+
+  finalizeTrade(proposalId: EntityId): TradeProposal {
+    const proposal = this.requireTradeProposal(proposalId);
+    if (proposal.status === "COMPLETED") throw new Error(`Trade already completed: ${proposalId}`);
+    if (proposal.status === "REJECTED" || proposal.status === "WITHDRAWN") throw new Error(`Trade cannot be finalized: ${proposal.status}`);
+    this.assertTradePlayerLists(proposal.proposerOrganizationId, proposal.targetOrganizationId, proposal.playersFromProposer, proposal.playersFromTarget);
+    const original = [...proposal.playersFromProposer, ...proposal.playersFromTarget].map((playerId) => ({
+      playerId,
+      player: structuredClone(this.requirePlayer(playerId)),
+    }));
+    try {
+      for (const playerId of proposal.playersFromProposer) {
+        this.transferPlayerOrganizationOnly(playerId, proposal.targetOrganizationId, "트레이드 이적");
+      }
+      for (const playerId of proposal.playersFromTarget) {
+        this.transferPlayerOrganizationOnly(playerId, proposal.proposerOrganizationId, "트레이드 이적");
+      }
+      proposal.status = "COMPLETED";
+      this.record("PLAYER_TRADED", {
+        reason: "트레이드 완료",
+        payload: {
+          proposalId,
+          proposerOrganizationId: proposal.proposerOrganizationId,
+          targetOrganizationId: proposal.targetOrganizationId,
+          playersFromProposer: proposal.playersFromProposer,
+          playersFromTarget: proposal.playersFromTarget,
+        },
+      });
+      this.assertInvariants();
+      return structuredClone(proposal);
+    } catch (error) {
+      for (const snapshot of original) this.players.set(snapshot.playerId, snapshot.player);
+      throw error;
+    }
+  }
+
+  requestPosting(input: PostingRequestInput): PostingRequest {
+    const player = this.requirePlayer(input.playerId);
+    const currentOrganizationId = input.currentOrganizationId ?? player.currentOrganizationId;
+    if (!currentOrganizationId) throw new Error(`Posting player must have a current organization: ${player.id}`);
+    if (player.currentOrganizationId !== currentOrganizationId) throw new Error(`Posting organization does not control player: ${player.id}`);
+    this.requireOrganization(currentOrganizationId);
+    this.requireLeague(input.sourceLeagueId);
+    for (const leagueId of input.targetLeagueIds) this.requireLeague(leagueId);
+    const sourceTeam = [...this.teams.values()].find((team) => team.organizationId === currentOrganizationId && team.leagueId === input.sourceLeagueId);
+    if (!sourceTeam) throw new Error(`Posting source league does not match player's organization: ${input.sourceLeagueId}`);
+    const posting: PostingRequest = {
+      ...structuredClone(input),
+      id: input.id ?? this.ids.nextId("posting"),
+      currentOrganizationId,
+      requestedOn: input.requestedOn ?? this.clock.now(),
+      status: input.status ?? "APPROVED",
+      reason: input.reason ?? "포스팅 요청",
+    };
+    this.postingRequests.set(posting.id, posting);
+    this.record("POSTING_REQUESTED", {
+      subjectId: player.id,
+      reason: posting.reason,
+      payload: { postingRequestId: posting.id, currentOrganizationId, sourceLeagueId: posting.sourceLeagueId, targetLeagueIds: posting.targetLeagueIds },
+    });
+    this.assertInvariants();
+    return structuredClone(posting);
+  }
+
+  failPosting(postingRequestId: EntityId, reason = "포스팅 실패"): PostingRequest {
+    const posting = this.requirePostingRequest(postingRequestId);
+    if (posting.status === "COMPLETED") throw new Error(`Completed posting cannot fail: ${postingRequestId}`);
+    posting.status = "FAILED";
+    this.record("POSTING_FAILED", {
+      subjectId: posting.playerId,
+      reason,
+      payload: { postingRequestId },
+    });
+    this.assertInvariants();
+    return structuredClone(posting);
+  }
+
+  calculatePlayerMarketValue(
+    playerId: EntityId,
+    viewerOrganizationId?: EntityId,
+    currency = "USD",
+  ): PlayerMarketValue {
+    const player = this.requirePlayer(playerId);
+    if (viewerOrganizationId) this.requireOrganization(viewerOrganizationId);
+    const report = viewerOrganizationId ? this.latestScoutingReport(playerId, viewerOrganizationId) : undefined;
+    const estimatedCurrentAbility = report?.estimatedCA ?? player.currentAbility;
+    const estimatedPotentialAbility = report
+      ? (report.estimatedPARange.low + report.estimatedPARange.high) / 2
+      : player.potentialAbility;
+    const active = this.activeContract(player);
+    const yearsRemaining = active ? Math.max(0, this.contractYears(this.clock.now(), active.endDate)) : 0;
+    const contractBurden = active ? (active.salary / 1_000_000) * Math.max(0.5, yearsRemaining) : 0;
+    const recentStats = this.getPlayerCareerStats(playerId);
+    const production = recentStats.batting.homeRuns * 0.25 + recentStats.batting.hits * 0.03 + recentStats.pitching.strikeouts * 0.04;
+    const ageCurve = player.age <= 24 ? 14 : player.age <= 30 ? 8 : player.age <= 34 ? 0 : -12;
+    const value = this.roundRate(
+      Math.max(0, estimatedCurrentAbility * 0.55 + estimatedPotentialAbility * 0.7 + production + ageCurve - contractBurden),
+    );
+    return {
+      playerId,
+      ...(viewerOrganizationId ? { organizationId: viewerOrganizationId } : {}),
+      value,
+      currency,
+      estimatedCurrentAbility: this.clampRating(estimatedCurrentAbility),
+      estimatedPotentialAbility: this.clampRating(estimatedPotentialAbility),
+      contractBurden: this.roundRate(contractBurden),
+      yearsRemaining,
+    };
   }
 
   createGameRoster(input: GameDayRosterInput): GameDayRoster {
@@ -1470,10 +1840,19 @@ export class LeagueWorld {
     const player = this.requirePlayer(playerId);
     const fromTeamId = player.currentTeamId;
     const fromOrganizationId = player.currentOrganizationId;
+    for (const contract of player.contracts) {
+      if (contract.contractStatus === "ACTIVE") contract.contractStatus = "TERMINATED";
+    }
     this.closeOpenRosterAssignment(player, reason);
     delete player.currentTeamId;
     delete player.currentOrganizationId;
     player.status = "FREE_AGENT";
+    player.freeAgentStatus = {
+      eligible: true,
+      becameFreeAgentOn: this.clock.now(),
+      ...(fromOrganizationId ? { previousOrganizationId: fromOrganizationId } : {}),
+      type: "RELEASED",
+    };
     this.replaceCareerEntry(player, "PLAYER", {
       role: player.primaryPosition,
       status: player.status,
@@ -1484,6 +1863,11 @@ export class LeagueWorld {
       subjectId: player.id,
       reason,
       payload: { fromTeamId, fromOrganizationId },
+    });
+    this.record("PLAYER_BECAME_FREE_AGENT", {
+      subjectId: player.id,
+      reason,
+      payload: { previousOrganizationId: fromOrganizationId, type: "RELEASED" },
     });
   }
 
@@ -1520,25 +1904,49 @@ export class LeagueWorld {
     if (!Number.isFinite(contract.salary) || contract.salary < 0) {
       throw new Error("Contract salary must be a non-negative number");
     }
+    if (this.activeContract(player) && contract.contractStatus === "ACTIVE") {
+      throw new Error(`Player already has an active contract: ${player.id}`);
+    }
+    if (contract.contractStatus === "ACTIVE" && player.currentOrganizationId && player.currentOrganizationId !== contract.organizationId) {
+      throw new Error(`Player already belongs to another organization: ${player.currentOrganizationId}`);
+    }
 
     const stored: PlayerContract = {
       ...structuredClone(contract),
       id: contract.id ?? this.ids.nextId("contract"),
+      years: contract.years ?? this.contractYears(contract.startDate, contract.endDate),
+      signingBonus: contract.signingBonus ?? 0,
     };
     player.contracts.push(stored);
     if (stored.contractStatus === "ACTIVE") {
-      if (player.currentOrganizationId && player.currentOrganizationId !== stored.organizationId) {
-        throw new Error(`Player already belongs to another organization: ${player.currentOrganizationId}`);
-      }
       player.currentOrganizationId = stored.organizationId;
       player.status = "PROFESSIONAL";
       player.firstProfessionalDate ??= stored.startDate;
+      delete player.freeAgentStatus;
+      if (player.draftEligibility?.status === "DRAFTED") {
+        player.draftEligibility.status = "SIGNED";
+        player.draftEligibility.reason = "드래프트 지명 후 계약 성공";
+      }
+      this.replaceCareerEntry(player, "PLAYER", {
+        ...(player.currentTeamId ? { teamId: player.currentTeamId } : {}),
+        role: player.primaryPosition,
+        status: player.status,
+        reason: "계약 체결",
+        organizationNameSnapshot: this.requireOrganization(stored.organizationId).name,
+      });
     }
     this.record("PLAYER_CONTRACT_REGISTERED", {
       subjectId: player.id,
       reason: "계약 등록",
       payload: { ...stored },
     });
+    if (stored.contractStatus === "ACTIVE") {
+      this.record("PLAYER_SIGNED", {
+        subjectId: player.id,
+        reason: "계약 체결",
+        payload: { contractId: stored.id, organizationId: stored.organizationId, salary: stored.salary, years: stored.years },
+      });
+    }
     this.assertInvariants();
     return structuredClone(stored);
   }
@@ -1715,6 +2123,7 @@ export class LeagueWorld {
     this.progressSeasonStatuses();
     this.refreshPlayerAges();
     this.recoverPlayerGameConditions();
+    this.expireContracts(this.clock.now());
     if (options.injuries !== false) this.progressPlayerInjuries(options);
     if (options.development !== false) this.progressPlayerDevelopment();
     this.progressDailyCareers(options);
@@ -1810,6 +2219,7 @@ export class LeagueWorld {
     this.validateSeasonAndScheduleInvariants(issues);
     this.validateGameRosterInvariants(issues);
     this.validateScoutingAndDraftInvariants(issues);
+    this.validateMarketInvariants(issues);
     for (const player of this.players.values()) {
       this.validatePlayerModel(player, issues);
       this.validatePersonCareer(player, "PLAYER", player.status, player.currentTeamId, issues);
@@ -1991,6 +2401,77 @@ export class LeagueWorld {
           }
           selectedPlayers.add(pick.playerId);
         }
+      }
+    }
+  }
+
+  private validateMarketInvariants(issues: string[]): void {
+    for (const offer of this.contractOffers.values()) {
+      if (!this.players.has(offer.playerId)) issues.push(`Contract offer ${offer.id} has missing player ${offer.playerId}`);
+      if (!this.organizations.has(offer.organizationId)) issues.push(`Contract offer ${offer.id} has missing organization ${offer.organizationId}`);
+      if (!["PENDING", "ACCEPTED", "REJECTED", "WITHDRAWN"].includes(offer.status)) {
+        issues.push(`Contract offer ${offer.id} has invalid status ${offer.status}`);
+      }
+      if (offer.endDate < offer.startDate) issues.push(`Contract offer ${offer.id} endDate is before startDate`);
+      if (!Number.isFinite(offer.salary) || offer.salary < 0) issues.push(`Contract offer ${offer.id} salary must be non-negative`);
+      if (!Number.isInteger(offer.years) || offer.years <= 0) issues.push(`Contract offer ${offer.id} has invalid years`);
+      if (offer.draftId && !this.drafts.has(offer.draftId)) issues.push(`Contract offer ${offer.id} has missing draft ${offer.draftId}`);
+      if (offer.postingRequestId && !this.postingRequests.has(offer.postingRequestId)) {
+        issues.push(`Contract offer ${offer.id} has missing posting request ${offer.postingRequestId}`);
+      }
+    }
+
+    for (const proposal of this.tradeProposals.values()) {
+      if (!this.organizations.has(proposal.proposerOrganizationId)) {
+        issues.push(`Trade proposal ${proposal.id} has missing proposer organization ${proposal.proposerOrganizationId}`);
+      }
+      if (!this.organizations.has(proposal.targetOrganizationId)) {
+        issues.push(`Trade proposal ${proposal.id} has missing target organization ${proposal.targetOrganizationId}`);
+      }
+      if (proposal.proposerOrganizationId === proposal.targetOrganizationId) {
+        issues.push(`Trade proposal ${proposal.id} uses the same organization on both sides`);
+      }
+      if (!["PROPOSED", "ACCEPTED", "REJECTED", "COUNTERED", "COMPLETED", "WITHDRAWN"].includes(proposal.status)) {
+        issues.push(`Trade proposal ${proposal.id} has invalid status ${proposal.status}`);
+      }
+      const allPlayers = [...proposal.playersFromProposer, ...proposal.playersFromTarget];
+      if (new Set(allPlayers).size !== allPlayers.length) {
+        issues.push(`Trade proposal ${proposal.id} includes the same player on both sides`);
+      }
+      for (const playerId of proposal.playersFromProposer) {
+        const player = this.players.get(playerId);
+        if (!player) issues.push(`Trade proposal ${proposal.id} has missing player ${playerId}`);
+        else if (proposal.status !== "COMPLETED" && player.currentOrganizationId !== proposal.proposerOrganizationId) {
+          issues.push(`Trade proposal ${proposal.id} proposer does not control player ${playerId}`);
+        }
+      }
+      for (const playerId of proposal.playersFromTarget) {
+        const player = this.players.get(playerId);
+        if (!player) issues.push(`Trade proposal ${proposal.id} has missing player ${playerId}`);
+        else if (proposal.status !== "COMPLETED" && player.currentOrganizationId !== proposal.targetOrganizationId) {
+          issues.push(`Trade proposal ${proposal.id} target does not control player ${playerId}`);
+        }
+      }
+    }
+
+    for (const posting of this.postingRequests.values()) {
+      const player = this.players.get(posting.playerId);
+      if (!player) issues.push(`Posting request ${posting.id} has missing player ${posting.playerId}`);
+      if (!this.organizations.has(posting.currentOrganizationId)) {
+        issues.push(`Posting request ${posting.id} has missing organization ${posting.currentOrganizationId}`);
+      }
+      if (!this.leagues.has(posting.sourceLeagueId)) issues.push(`Posting request ${posting.id} has missing source league`);
+      for (const leagueId of posting.targetLeagueIds) {
+        if (!this.leagues.has(leagueId)) issues.push(`Posting request ${posting.id} has missing target league ${leagueId}`);
+      }
+      if (!["REQUESTED", "APPROVED", "COMPLETED", "FAILED"].includes(posting.status)) {
+        issues.push(`Posting request ${posting.id} has invalid status ${posting.status}`);
+      }
+      if (posting.status === "COMPLETED" && player?.currentOrganizationId === posting.currentOrganizationId) {
+        issues.push(`Posting request ${posting.id} completed but player stayed with source organization`);
+      }
+      if (posting.status === "FAILED" && player && player.currentOrganizationId !== posting.currentOrganizationId) {
+        issues.push(`Posting request ${posting.id} failed but player left source organization`);
       }
     }
   }
@@ -3327,6 +3808,167 @@ export class LeagueWorld {
     }
   }
 
+  private normalizeContractDemand(demand: PlayerContractDemand): PlayerContractDemand {
+    return {
+      desiredSalary: Math.max(0, Math.round(demand.desiredSalary)),
+      desiredYears: Math.max(1, Math.round(demand.desiredYears)),
+      minimumSalary: Math.max(0, Math.round(demand.minimumSalary)),
+      minimumYears: Math.max(1, Math.round(demand.minimumYears)),
+      preferredRole: demand.preferredRole,
+      ...(demand.preferredLeagueIds ? { preferredLeagueIds: structuredClone(demand.preferredLeagueIds) } : {}),
+      ...(demand.preferredCountryIds ? { preferredCountryIds: structuredClone(demand.preferredCountryIds) } : {}),
+    };
+  }
+
+  private defaultContractDemand(player: Player): PlayerContractDemand {
+    const baseSalary = Math.max(30_000, Math.round((player.currentAbility * 18_000 + player.potentialAbility * 12_000) / 10) * 10);
+    return {
+      desiredSalary: baseSalary,
+      desiredYears: player.age < 24 ? 3 : player.age < 31 ? 2 : 1,
+      minimumSalary: Math.round(baseSalary * 0.65),
+      minimumYears: 1,
+      preferredRole: player.primaryPosition,
+    };
+  }
+
+  private organizationOpportunityScore(player: Player, organizationId: EntityId): number {
+    const teams = [...this.teams.values()].filter((team) => team.organizationId === organizationId);
+    const leagueScore = teams.reduce((best, team) => Math.max(best, 90 - this.requireLeague(team.leagueId).level * 8), 40);
+    const positionDepth = [...this.players.values()].filter(
+      (candidate) => candidate.currentOrganizationId === organizationId && candidate.primaryPosition === player.primaryPosition,
+    ).length;
+    const playingTime = Math.max(20, 90 - positionDepth * 12);
+    const standingsScore = teams.reduce((best, team) => {
+      const records = [...this.standings.values()].flatMap((seasonRecords) => [...seasonRecords.values()]);
+      const record = records.find((candidate) => candidate.teamId === team.id);
+      return Math.max(best, record ? record.winningPercentage * 100 : 50);
+    }, 50);
+    return this.clampRating(leagueScore * 0.35 + playingTime * 0.35 + standingsScore * 0.3);
+  }
+
+  private contractPreferenceScore(offer: ContractOffer, demand: PlayerContractDemand): number {
+    let score = 50;
+    if (demand.preferredRole && offer.preferredRole === demand.preferredRole) score += 12;
+    const teams = [...this.teams.values()].filter((team) => team.organizationId === offer.organizationId);
+    if (demand.preferredLeagueIds?.some((leagueId) => teams.some((team) => team.leagueId === leagueId))) score += 18;
+    if (demand.preferredCountryIds?.some((countryId) => teams.some((team) => this.requireLeague(team.leagueId).countryId === countryId))) score += 18;
+    if (offer.noTradeClause) score += 4;
+    if (offer.playerOption) score += 4;
+    return this.clampRating(score);
+  }
+
+  private markDraftPickSigned(offer: ContractOffer): void {
+    if (!offer.draftId) return;
+    const draft = this.requireDraft(offer.draftId);
+    const pick = draft.picks.find((candidate) => candidate.playerId === offer.playerId && candidate.organizationId === offer.organizationId);
+    if (pick) pick.status = "SIGNED";
+  }
+
+  private completePostingIfNeeded(offer: ContractOffer): void {
+    if (!offer.postingRequestId) return;
+    const posting = this.requirePostingRequest(offer.postingRequestId);
+    posting.status = "COMPLETED";
+    posting.completedOn = this.clock.now();
+    this.record("POSTING_COMPLETED", {
+      subjectId: posting.playerId,
+      reason: "포스팅 해외 계약 완료",
+      payload: { postingRequestId: posting.id, organizationId: offer.organizationId, compensationFee: posting.compensationFee ?? 0 },
+    });
+  }
+
+  private failPostingIfAllOffersRejected(offer: ContractOffer): void {
+    if (!offer.postingRequestId) return;
+    const posting = this.requirePostingRequest(offer.postingRequestId);
+    if (posting.status !== "APPROVED") return;
+    const offers = [...this.contractOffers.values()].filter((candidate) => candidate.postingRequestId === posting.id);
+    if (offers.length > 0 && offers.every((candidate) => candidate.status === "REJECTED" || candidate.status === "WITHDRAWN")) {
+      posting.status = "FAILED";
+      this.record("POSTING_FAILED", {
+        subjectId: posting.playerId,
+        reason: "해외 제안 거절",
+        payload: { postingRequestId: posting.id },
+      });
+    }
+  }
+
+  private assertTradePlayerLists(
+    proposerOrganizationId: EntityId,
+    targetOrganizationId: EntityId,
+    playersFromProposer: EntityId[],
+    playersFromTarget: EntityId[],
+  ): void {
+    const proposerSet = new Set(playersFromProposer);
+    for (const playerId of playersFromTarget) {
+      if (proposerSet.has(playerId)) throw new Error(`Player cannot be on both sides of a trade: ${playerId}`);
+    }
+    for (const playerId of playersFromProposer) {
+      const player = this.requirePlayer(playerId);
+      if (player.currentOrganizationId !== proposerOrganizationId) {
+        throw new Error(`Trade proposer does not control player ${playerId}`);
+      }
+    }
+    for (const playerId of playersFromTarget) {
+      const player = this.requirePlayer(playerId);
+      if (player.currentOrganizationId !== targetOrganizationId) {
+        throw new Error(`Trade target does not control player ${playerId}`);
+      }
+    }
+  }
+
+  private buildCounterProposal(proposal: TradeProposal, evaluatorId: EntityId): TradeProposal {
+    const counter: TradeProposal = {
+      id: this.ids.nextId("trade_counter"),
+      proposerOrganizationId: evaluatorId,
+      targetOrganizationId: evaluatorId === proposal.targetOrganizationId ? proposal.proposerOrganizationId : proposal.targetOrganizationId,
+      playersFromProposer: evaluatorId === proposal.targetOrganizationId ? structuredClone(proposal.playersFromTarget) : structuredClone(proposal.playersFromProposer),
+      playersFromTarget: evaluatorId === proposal.targetOrganizationId ? structuredClone(proposal.playersFromProposer) : structuredClone(proposal.playersFromTarget),
+      cash: Math.round((proposal.cash ?? 0) + 1_000_000),
+      draftPickIds: [],
+      status: "COUNTERED",
+      proposedOn: this.clock.now(),
+      reason: "AI counter proposal",
+    };
+    proposal.status = "COUNTERED";
+    proposal.counterProposalId = counter.id;
+    this.tradeProposals.set(counter.id, counter);
+    return counter;
+  }
+
+  private transferPlayerOrganizationOnly(playerId: EntityId, toOrganizationId: EntityId, reason: string): void {
+    const player = this.requirePlayer(playerId);
+    const fromOrganizationId = player.currentOrganizationId;
+    this.requireOrganization(toOrganizationId);
+    this.closeOpenRosterAssignment(player, reason);
+    delete player.currentTeamId;
+    delete player.rosterStatus;
+    player.currentOrganizationId = toOrganizationId;
+    player.status = "PROFESSIONAL";
+    for (const contract of player.contracts) {
+      if (contract.contractStatus === "ACTIVE") contract.organizationId = toOrganizationId;
+    }
+    this.replaceCareerEntry(player, "PLAYER", {
+      role: player.primaryPosition,
+      status: player.status,
+      reason,
+      organizationNameSnapshot: this.requireOrganization(toOrganizationId).name,
+    });
+    this.record("PLAYER_MOVED", {
+      subjectId: player.id,
+      reason,
+      payload: { fromOrganizationId, toOrganizationId, trade: true },
+    });
+  }
+
+  private activeContract(player: Player): PlayerContract | undefined {
+    return player.contracts.find((contract) => contract.contractStatus === "ACTIVE");
+  }
+
+  private contractYears(startDate: ISODate, endDate: ISODate): number {
+    const startYear = Number(startDate.slice(0, 4));
+    const endYear = Number(endDate.slice(0, 4));
+    return Math.max(1, endYear - startYear + 1);
+  }
+
   private isDerivedStatKey(key: string): boolean {
     return [
       "average",
@@ -4269,6 +4911,8 @@ export class LeagueWorld {
       contracts: structuredClone(player.contracts ?? []),
       careerEntries: structuredClone(player.careerEntries ?? []),
       ...(player.draftEligibility ? { draftEligibility: structuredClone(player.draftEligibility) } : {}),
+      ...(player.contractDemand ? { contractDemand: this.normalizeContractDemand(player.contractDemand) } : {}),
+      ...(player.freeAgentStatus ? { freeAgentStatus: structuredClone(player.freeAgentStatus) } : {}),
     };
     normalized.age = this.calculateAge(normalized.birthDate);
     return normalized;
@@ -4627,7 +5271,7 @@ export class LeagueWorld {
         issues.push(`Player ${player.id} draftEligibility is declared while not eligible`);
       }
       if (
-        !["NOT_ELIGIBLE", "ELIGIBLE", "DECLARED", "DRAFTED", "UNDRAFTED", "WITHDREW"].includes(
+        !["NOT_ELIGIBLE", "ELIGIBLE", "DECLARED", "DRAFTED", "SIGNED", "UNSIGNED_DRAFTEE", "UNDRAFTED", "WITHDREW"].includes(
           player.draftEligibility.status,
         )
       ) {
@@ -4663,6 +5307,7 @@ export class LeagueWorld {
   ): boolean {
     if (careerTeamId === currentTeamId) return true;
     if (personType === "MANAGER") return false;
+    if (!careerTeamId) return true;
     if (!careerTeamId || !currentTeamId) return false;
     const careerTeam = this.teams.get(careerTeamId);
     const currentTeam = this.teams.get(currentTeamId);
@@ -4670,6 +5315,7 @@ export class LeagueWorld {
   }
 
   private validatePlayerContracts(player: Player, issues: string[]): void {
+    let activeContracts = 0;
     for (const contract of player.contracts) {
       if (contract.playerId !== player.id) {
         issues.push(`Contract ${contract.id} points to ${contract.playerId}, expected ${player.id}`);
@@ -4680,11 +5326,33 @@ export class LeagueWorld {
       if (contract.endDate < contract.startDate) {
         issues.push(`Contract ${contract.id} endDate is before startDate`);
       }
+      if (!Number.isInteger(contract.years) || contract.years <= 0) {
+        issues.push(`Contract ${contract.id} has invalid years`);
+      }
       if (!Number.isFinite(contract.salary) || contract.salary < 0) {
         issues.push(`Contract ${contract.id} salary must be non-negative`);
       }
+      if (contract.signingBonus !== undefined && (!Number.isFinite(contract.signingBonus) || contract.signingBonus < 0)) {
+        issues.push(`Contract ${contract.id} signingBonus must be non-negative`);
+      }
       if (!contract.currency) {
         issues.push(`Contract ${contract.id} must have currency`);
+      }
+      if (contract.contractStatus === "ACTIVE") {
+        activeContracts += 1;
+        if (player.currentOrganizationId !== contract.organizationId) {
+          issues.push(`Contract ${contract.id} organization does not match player currentOrganizationId`);
+        }
+      }
+    }
+    if (activeContracts > 1) {
+      issues.push(`Player ${player.id} has multiple active contracts`);
+    }
+    if (player.freeAgentStatus) {
+      if (player.status !== "FREE_AGENT") issues.push(`Player ${player.id} has freeAgentStatus but is not FREE_AGENT`);
+      if (!player.freeAgentStatus.eligible) issues.push(`Player ${player.id} freeAgentStatus is not eligible`);
+      if (player.freeAgentStatus.previousOrganizationId && !this.organizations.has(player.freeAgentStatus.previousOrganizationId)) {
+        issues.push(`Player ${player.id} freeAgentStatus has missing previous organization`);
       }
     }
   }
@@ -4859,6 +5527,24 @@ export class LeagueWorld {
   private requireDraft(id: EntityId): Draft {
     const value = this.drafts.get(id);
     if (!value) throw new Error(`Draft not found: ${id}`);
+    return value;
+  }
+
+  private requireContractOffer(id: EntityId): ContractOffer {
+    const value = this.contractOffers.get(id);
+    if (!value) throw new Error(`Contract offer not found: ${id}`);
+    return value;
+  }
+
+  private requireTradeProposal(id: EntityId): TradeProposal {
+    const value = this.tradeProposals.get(id);
+    if (!value) throw new Error(`Trade proposal not found: ${id}`);
+    return value;
+  }
+
+  private requirePostingRequest(id: EntityId): PostingRequest {
+    const value = this.postingRequests.get(id);
+    if (!value) throw new Error(`Posting request not found: ${id}`);
     return value;
   }
 

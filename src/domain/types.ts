@@ -47,6 +47,18 @@ export type RosterStatus = "ACTIVE" | "RESERVE" | "INJURED" | "REHAB" | "INACTIV
 
 export type ContractStatus = "ACTIVE" | "EXPIRED" | "TERMINATED";
 
+export type ContractOfferStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN";
+
+export type ContractOfferDecision = "ACCEPT" | "REJECT" | "HOLD";
+
+export type FreeAgentType = "RELEASED" | "CONTRACT_EXPIRED" | "UNDRAFTED" | "INTERNATIONAL";
+
+export type TradeProposalStatus = "PROPOSED" | "ACCEPTED" | "REJECTED" | "COUNTERED" | "COMPLETED" | "WITHDRAWN";
+
+export type TradeAiDecision = "ACCEPT" | "REJECT" | "COUNTER";
+
+export type PostingStatus = "REQUESTED" | "APPROVED" | "COMPLETED" | "FAILED";
+
 export type SeasonStatus = "PRESEASON" | "REGULAR_SEASON" | "POSTSEASON" | "COMPLETED";
 
 export type CompetitionType =
@@ -84,6 +96,8 @@ export type DraftEligibilityStatus =
   | "ELIGIBLE"
   | "DECLARED"
   | "DRAFTED"
+  | "SIGNED"
+  | "UNSIGNED_DRAFTEE"
   | "UNDRAFTED"
   | "WITHDREW";
 
@@ -144,6 +158,15 @@ export type WorldEventType =
   | "DRAFT_DECLARED"
   | "PLAYER_DRAFTED"
   | "PLAYER_UNDRAFTED"
+  | "CONTRACT_OFFERED"
+  | "PLAYER_SIGNED"
+  | "CONTRACT_REJECTED"
+  | "TRADE_PROPOSED"
+  | "PLAYER_TRADED"
+  | "PLAYER_BECAME_FREE_AGENT"
+  | "POSTING_REQUESTED"
+  | "POSTING_COMPLETED"
+  | "POSTING_FAILED"
   | "SEASON_STARTED"
   | "SEASON_ENDED"
   | "GAME_PLAYED";

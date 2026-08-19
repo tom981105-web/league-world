@@ -479,7 +479,7 @@ test("player movement, release, and retirement write career entries with events"
   );
   assert.deepEqual(
     world.events.map((event) => event.type),
-    ["PLAYER_CREATED", "PLAYER_MOVED", "PLAYER_RELEASED", "PLAYER_RETIRED"],
+    ["PLAYER_CREATED", "PLAYER_MOVED", "PLAYER_RELEASED", "PLAYER_BECAME_FREE_AGENT", "PLAYER_RETIRED"],
   );
 });
 
@@ -1186,7 +1186,7 @@ test("1군 to 2군 demotion is a roster move, not a transfer", () => {
   const player = world.players.get("demotion_player");
   assert.equal(player?.currentTeamId, "team_seoul_futures");
   assert.equal(player?.currentOrganizationId, "org_seoul");
-  assert.equal(player?.careerEntries.length, 0);
+  assert.equal(player?.careerEntries.length, 1);
   assert.equal(world.events.at(-1)?.type, "PLAYER_DEMOTED");
 });
 
@@ -1328,7 +1328,8 @@ test("contract registration stores minimal contract data and first professional 
   assert.equal(player?.contracts.at(0)?.organizationId, "org_seoul");
   assert.equal(player?.firstProfessionalDate, "2027-02-01");
   assert.equal(player?.firstTopLevelAppearanceDate, undefined);
-  assert.equal(world.events.at(-1)?.type, "PLAYER_CONTRACT_REGISTERED");
+  assert.ok(world.events.some((event) => event.type === "PLAYER_CONTRACT_REGISTERED"));
+  assert.ok(world.events.some((event) => event.type === "PLAYER_SIGNED"));
 });
 
 test("current team and organization invariant catches roster contradictions", () => {
@@ -2815,4 +2816,263 @@ test("scouting and draft invariants catch corrupted local state", () => {
   assert.ok(issues.some((issue) => issue.includes("estimated PA range is inverted")));
   assert.ok(issues.some((issue) => issue.includes("overallPick is inconsistent")));
   assert.ok(issues.some((issue) => issue.includes("missing player")));
+});
+
+function signPlayerToOrganization(world, playerId, organizationId, teamId) {
+  world.registerContract({
+    playerId,
+    organizationId,
+    startDate: "2027-01-01",
+    endDate: "2029-12-31",
+    salary: 500000,
+    currency: "USD",
+    contractStatus: "ACTIVE",
+  });
+  if (teamId) world.assignPlayerToRoster(playerId, teamId, "ACTIVE", "시장 테스트 로스터 등록");
+}
+
+function addMarketPlayer(world, id, organizationId, teamId, overrides = {}) {
+  world.addPlayer(createPlayer({
+    id,
+    name: `${id} Player`,
+    status: organizationId ? "PROFESSIONAL" : "FREE_AGENT",
+    birthDate: "2003-04-01",
+    currentAbility: 55,
+    potentialAbility: 70,
+    trueCurrentAbility: 55,
+    truePotentialAbility: 70,
+    freeAgentStatus: organizationId ? undefined : {
+      eligible: true,
+      becameFreeAgentOn: "2027-01-01",
+      type: "RELEASED",
+    },
+    ...overrides,
+  }));
+  if (organizationId) signPlayerToOrganization(world, id, organizationId, teamId);
+  return world.players.get(id);
+}
+
+function makeBasicOffer(world, playerId, organizationId, overrides = {}) {
+  return world.makeContractOffer({
+    playerId,
+    organizationId,
+    salary: 900000,
+    currency: "USD",
+    startDate: "2027-01-01",
+    endDate: "2029-12-31",
+    ...overrides,
+  });
+}
+
+test("drafted players can sign or fail a post-draft contract without automatic roster assignment", () => {
+  const world = createWorld(9201);
+  const { season } = createDraftSeason(world);
+  addDraftProspect(world, "draft_sign", { truePotentialAbility: 88 });
+  addDraftProspect(world, "draft_fail", { truePotentialAbility: 70 });
+  declareForDraft(world, "draft_sign");
+  declareForDraft(world, "draft_fail");
+  const draft = world.createDraft({
+    id: "draft_contracts",
+    leagueId: "league_kr1",
+    seasonId: season.id,
+    year: 2027,
+    rounds: 2,
+    draftOrder: ["org_seoul"],
+  });
+  world.makeDraftPick(draft.id, "org_seoul", "draft_sign");
+  world.makeDraftPick(draft.id, "org_seoul", "draft_fail");
+
+  const acceptedOffer = makeBasicOffer(world, "draft_sign", "org_seoul", { draftId: draft.id });
+  const contract = world.acceptContractOffer(acceptedOffer.id);
+  const rejectedOffer = makeBasicOffer(world, "draft_fail", "org_seoul", { draftId: draft.id, salary: 10000 });
+  world.rejectContractOffer(rejectedOffer.id, "계약금 이견");
+
+  assert.equal(contract.organizationId, "org_seoul");
+  assert.equal(world.players.get("draft_sign").draftEligibility.status, "SIGNED");
+  assert.equal(world.players.get("draft_sign").currentTeamId, undefined);
+  assert.equal(world.players.get("draft_fail").draftEligibility.status, "UNSIGNED_DRAFTEE");
+});
+
+test("free agents can receive multiple offers and choose non-highest money based on preferences", () => {
+  const world = createWorld(9202);
+  addMarketPlayer(world, "fa_choice");
+  world.setPlayerContractDemand("fa_choice", {
+    desiredSalary: 1000000,
+    desiredYears: 2,
+    minimumSalary: 500000,
+    minimumYears: 1,
+    preferredRole: "SS",
+    preferredCountryIds: ["country_kr"],
+  });
+  const domestic = makeBasicOffer(world, "fa_choice", "org_seoul", {
+    id: "offer_domestic",
+    salary: 900000,
+    preferredRole: "SS",
+  });
+  const overseas = makeBasicOffer(world, "fa_choice", "org_harbor", {
+    id: "offer_overseas",
+    salary: 950000,
+    preferredRole: "BENCH",
+  });
+
+  const chosen = world.chooseBestContractOffer("fa_choice");
+  world.acceptContractOffer(chosen.offerId);
+
+  assert.equal(chosen.offerId, domestic.id);
+  assert.equal(world.contractOffers.get(overseas.id).status, "REJECTED");
+  assert.equal(world.players.get("fa_choice").currentOrganizationId, "org_seoul");
+  assert.ok(world.events.some((event) => event.type === "CONTRACT_OFFERED"));
+  assert.ok(world.events.some((event) => event.type === "PLAYER_SIGNED"));
+});
+
+test("contract expiry and player release create free agency state and events", () => {
+  const world = createWorld();
+  addMarketPlayer(world, "expire_player", "org_seoul", "team_seoul", {
+    currentAbility: 45,
+    potentialAbility: 50,
+  });
+  world.players.get("expire_player").contracts[0].startDate = "2026-01-01";
+  world.players.get("expire_player").contracts[0].endDate = "2026-12-31";
+  world.expireContracts("2027-01-01");
+
+  assert.equal(world.players.get("expire_player").status, "FREE_AGENT");
+  assert.equal(world.players.get("expire_player").freeAgentStatus.type, "CONTRACT_EXPIRED");
+
+  addMarketPlayer(world, "release_market", "org_busan", "team_busan");
+  world.releasePlayer("release_market", "전력 외 방출");
+  assert.equal(world.players.get("release_market").contracts[0].contractStatus, "TERMINATED");
+  assert.equal(world.players.get("release_market").freeAgentStatus.type, "RELEASED");
+  assert.ok(world.events.filter((event) => event.type === "PLAYER_BECAME_FREE_AGENT").length >= 2);
+});
+
+test("trades support one-for-one, multi-player structures, AI rejection and counter", () => {
+  const world = createWorld(9203);
+  addMarketPlayer(world, "seoul_star", "org_seoul", "team_seoul", { currentAbility: 82, potentialAbility: 84 });
+  addMarketPlayer(world, "seoul_depth", "org_seoul", "team_seoul_futures", { currentAbility: 48, potentialAbility: 55 });
+  addMarketPlayer(world, "busan_star", "org_busan", "team_busan", { currentAbility: 80, potentialAbility: 82 });
+  addMarketPlayer(world, "busan_depth", "org_busan", "team_busan", { currentAbility: 42, potentialAbility: 52 });
+
+  const fair = world.proposeTrade({
+    id: "trade_fair",
+    proposerOrganizationId: "org_seoul",
+    targetOrganizationId: "org_busan",
+    playersFromProposer: ["seoul_star"],
+    playersFromTarget: ["busan_star"],
+  });
+  assert.equal(world.evaluateTradeProposal(fair.id).decision, "ACCEPT");
+  world.finalizeTrade(fair.id);
+  assert.equal(world.players.get("seoul_star").currentOrganizationId, "org_busan");
+  assert.equal(world.players.get("seoul_star").currentTeamId, undefined);
+  assert.equal(world.players.get("seoul_star").contracts.at(-1).organizationId, "org_busan");
+
+  const bad = world.proposeTrade({
+    id: "trade_bad",
+    proposerOrganizationId: "org_seoul",
+    targetOrganizationId: "org_busan",
+    playersFromProposer: ["seoul_depth"],
+    playersFromTarget: ["seoul_star", "busan_depth"],
+  });
+  const evaluation = world.evaluateTradeProposal(bad.id, "org_busan");
+  assert.ok(["REJECT", "COUNTER"].includes(evaluation.decision));
+  if (evaluation.decision === "COUNTER") assert.equal(evaluation.counterProposal.status, "COUNTERED");
+  assert.throws(() => world.proposeTrade({
+    proposerOrganizationId: "org_seoul",
+    targetOrganizationId: "org_busan",
+    playersFromProposer: ["seoul_depth"],
+    playersFromTarget: ["seoul_depth"],
+  }), /both sides/);
+});
+
+test("posting supports overseas contract success and rejected offers leave the player home", () => {
+  const world = createWorld(9204);
+  addMarketPlayer(world, "posting_success", "org_seoul", "team_seoul", { currentAbility: 78, potentialAbility: 82 });
+  const posting = world.requestPosting({
+    id: "posting_success_req",
+    playerId: "posting_success",
+    currentOrganizationId: "org_seoul",
+    sourceLeagueId: "league_kr1",
+    targetLeagueIds: ["league_pw1"],
+    compensationFee: 500000,
+  });
+  const offer = makeBasicOffer(world, "posting_success", "org_harbor", {
+    postingRequestId: posting.id,
+    salary: 1500000,
+  });
+  world.acceptContractOffer(offer.id);
+  assert.equal(world.postingRequests.get(posting.id).status, "COMPLETED");
+  assert.equal(world.players.get("posting_success").currentOrganizationId, "org_harbor");
+
+  addMarketPlayer(world, "posting_reject", "org_busan", "team_busan", { currentAbility: 70, potentialAbility: 72 });
+  const rejectedPosting = world.requestPosting({
+    id: "posting_reject_req",
+    playerId: "posting_reject",
+    currentOrganizationId: "org_busan",
+    sourceLeagueId: "league_kr1",
+    targetLeagueIds: ["league_pw1"],
+  });
+  const rejectedOffer = makeBasicOffer(world, "posting_reject", "org_harbor", {
+    postingRequestId: rejectedPosting.id,
+    salary: 10000,
+  });
+  world.rejectContractOffer(rejectedOffer.id, "해외 조건 거절");
+  assert.equal(world.postingRequests.get(rejectedPosting.id).status, "FAILED");
+  assert.equal(world.players.get("posting_reject").currentOrganizationId, "org_busan");
+});
+
+test("market value and negotiations are deterministic with the same seed", () => {
+  function run(seed) {
+    const world = createWorld(seed);
+    addMarketPlayer(world, "market_seed");
+    const offer = makeBasicOffer(world, "market_seed", "org_seoul", { salary: 750000 });
+    return {
+      evaluation: world.evaluateContractOffer(offer.id),
+      value: world.calculatePlayerMarketValue("market_seed", "org_seoul"),
+    };
+  }
+
+  assert.deepEqual(run(9205), run(9205));
+});
+
+test("market invariants catch conflicting contracts, trade ownership, and posting contradictions", () => {
+  const world = createWorld();
+  addMarketPlayer(world, "bad_market", "org_seoul", "team_seoul");
+  world.players.get("bad_market").contracts.push({
+    id: "bad_contract_extra",
+    playerId: "bad_market",
+    organizationId: "org_busan",
+    startDate: "2027-01-01",
+    endDate: "2028-12-31",
+    years: 2,
+    salary: 1,
+    currency: "USD",
+    contractStatus: "ACTIVE",
+  });
+  world.tradeProposals.set("bad_trade", {
+    id: "bad_trade",
+    proposerOrganizationId: "org_seoul",
+    targetOrganizationId: "org_busan",
+    playersFromProposer: ["bad_market"],
+    playersFromTarget: ["bad_market"],
+    cash: 0,
+    draftPickIds: [],
+    status: "PROPOSED",
+    proposedOn: "2027-01-01",
+    reason: "bad",
+  });
+  world.postingRequests.set("bad_posting", {
+    id: "bad_posting",
+    playerId: "bad_market",
+    currentOrganizationId: "org_busan",
+    sourceLeagueId: "league_kr1",
+    targetLeagueIds: ["league_pw1"],
+    requestedOn: "2027-01-01",
+    status: "FAILED",
+    reason: "bad",
+  });
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("multiple active contracts")));
+  assert.ok(issues.some((issue) => issue.includes("organization does not match player currentOrganizationId")));
+  assert.ok(issues.some((issue) => issue.includes("same player on both sides")));
+  assert.ok(issues.some((issue) => issue.includes("failed but player left source organization")));
 });

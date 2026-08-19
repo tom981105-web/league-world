@@ -5,6 +5,8 @@ import type {
   BattingLeaderCategory,
   BullpenRole,
   ContractStatus,
+  ContractOfferDecision,
+  ContractOfferStatus,
   CompetitionType,
   DraftDecision,
   DraftEligibilityStatus,
@@ -23,11 +25,15 @@ import type {
   PlateAppearanceResult,
   PitchingLeaderCategory,
   PlayerStatus,
+  PostingStatus,
   RosterStatus,
   ScoutingRecommendation,
   SeasonStatus,
   TeamType,
   ThrowingHand,
+  TradeAiDecision,
+  TradeProposalStatus,
+  FreeAgentType,
   WorldEventType,
 } from "./types.js";
 
@@ -105,6 +111,8 @@ export interface Player {
   firstProfessionalDate?: ISODate;
   firstTopLevelAppearanceDate?: ISODate;
   draftEligibility?: DraftEligibility;
+  contractDemand?: PlayerContractDemand;
+  freeAgentStatus?: FreeAgentStatus;
   rosterAssignments: RosterAssignment[];
   contracts: PlayerContract[];
   careerEntries: CareerEntry[];
@@ -206,9 +214,108 @@ export interface PlayerContract {
   organizationId: EntityId;
   startDate: ISODate;
   endDate: ISODate;
+  years: number;
   salary: number;
   currency: string;
+  signingBonus?: number;
+  noTradeClause?: boolean;
+  playerOption?: boolean;
+  teamOption?: boolean;
   contractStatus: ContractStatus;
+}
+
+export interface PlayerContractDemand {
+  desiredSalary: number;
+  desiredYears: number;
+  minimumSalary: number;
+  minimumYears: number;
+  preferredRole: string;
+  preferredLeagueIds?: EntityId[];
+  preferredCountryIds?: EntityId[];
+}
+
+export interface ContractOffer {
+  id: EntityId;
+  playerId: EntityId;
+  organizationId: EntityId;
+  salary: number;
+  currency: string;
+  signingBonus?: number;
+  startDate: ISODate;
+  endDate: ISODate;
+  years: number;
+  noTradeClause?: boolean;
+  playerOption?: boolean;
+  teamOption?: boolean;
+  preferredRole?: string;
+  status: ContractOfferStatus;
+  offeredOn: ISODate;
+  draftId?: EntityId;
+  postingRequestId?: EntityId;
+  reason: string;
+}
+
+export interface ContractOfferEvaluation {
+  offerId: EntityId;
+  playerId: EntityId;
+  organizationId: EntityId;
+  decision: ContractOfferDecision;
+  score: number;
+  reason: string;
+}
+
+export interface FreeAgentStatus {
+  eligible: boolean;
+  becameFreeAgentOn: ISODate;
+  previousOrganizationId?: EntityId;
+  type: FreeAgentType;
+}
+
+export interface TradeProposal {
+  id: EntityId;
+  proposerOrganizationId: EntityId;
+  targetOrganizationId: EntityId;
+  playersFromProposer: EntityId[];
+  playersFromTarget: EntityId[];
+  cash?: number;
+  draftPickIds?: EntityId[];
+  status: TradeProposalStatus;
+  proposedOn: ISODate;
+  reason: string;
+  counterProposalId?: EntityId;
+}
+
+export interface TradeEvaluation {
+  proposalId: EntityId;
+  organizationId: EntityId;
+  decision: TradeAiDecision;
+  score: number;
+  reason: string;
+  counterProposal?: TradeProposal;
+}
+
+export interface PostingRequest {
+  id: EntityId;
+  playerId: EntityId;
+  currentOrganizationId: EntityId;
+  sourceLeagueId: EntityId;
+  targetLeagueIds: EntityId[];
+  requestedOn: ISODate;
+  status: PostingStatus;
+  compensationFee?: number;
+  completedOn?: ISODate;
+  reason: string;
+}
+
+export interface PlayerMarketValue {
+  playerId: EntityId;
+  organizationId?: EntityId;
+  value: number;
+  currency: string;
+  estimatedCurrentAbility: number;
+  estimatedPotentialAbility: number;
+  contractBurden: number;
+  yearsRemaining: number;
 }
 
 export interface BattingRatings {
