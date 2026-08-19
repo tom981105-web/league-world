@@ -305,6 +305,38 @@ function createReadyGame(world, options = {}) {
   return { game, homePlayers: seoulPlayers, awayPlayers: busanPlayers };
 }
 
+function scheduleSameSeasonGame(world, firstGame, scheduledDate) {
+  return world.scheduleGame({
+    seasonId: firstGame.seasonId,
+    competitionId: firstGame.competitionId,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate,
+  });
+}
+
+function prepareRosterForExistingGame(world, game, teamId, playerIds) {
+  const lineupPlayerIds = playerIds.slice(0, lineupPositionsWithDh.length);
+  const benchPlayerIds = playerIds.filter((playerId) => !lineupPlayerIds.includes(playerId));
+  world.createGameRoster({
+    gameId: game.id,
+    teamId,
+    activePlayerIds: playerIds,
+    startingLineup: lineupFrom(lineupPlayerIds, lineupPositionsWithDh),
+    startingPitcherId: playerIds.at(-1),
+    benchPlayerIds,
+    bullpenPlayerIds: benchPlayerIds.filter((playerId) => world.players.get(playerId)?.primaryPosition === "P"),
+    rules: { maxActivePlayers: 26, battingOrderSize: 9, usesDH: true },
+  });
+}
+
+function playOneInningScriptedGame(world, gameId, awayResults, homeResults = ["GROUND_OUT", "FLY_OUT", "LINE_OUT"]) {
+  world.startGame(gameId);
+  for (const result of awayResults) world.applyPlateAppearanceResult(gameId, result);
+  for (const result of homeResults) world.applyPlateAppearanceResult(gameId, result);
+  return world.liveGames.get(gameId);
+}
+
 test("countries and leagues are owned by the world before teams are added", () => {
   const world = createWorld();
 
@@ -2090,4 +2122,214 @@ test("live game invariants catch invalid local mutations", () => {
   assert.ok(issues.some((issue) => issue.includes("current batter is already on base")));
   assert.ok(issues.some((issue) => issue.includes("current pitcher is not on active roster")));
   assert.ok(issues.some((issue) => issue.includes("box score runs do not match")));
+});
+
+test("completed box score accumulates single-game batting and pitching season stats", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+
+  playOneInningScriptedGame(world, game.id, ["SINGLE", "DOUBLE", "HOME_RUN", "STRIKEOUT", "GROUND_OUT", "FLY_OUT"]);
+
+  const firstBatter = world.getPlayerBattingSeasonStats(awayPlayers[0], game.seasonId)[0];
+  const homerBatter = world.getPlayerBattingSeasonStats(awayPlayers[2], game.seasonId)[0];
+  const pitcher = world.getPlayerPitchingSeasonStats(homePlayers.at(-1), game.seasonId)[0];
+
+  assert.equal(firstBatter.games, 1);
+  assert.equal(firstBatter.plateAppearances, 1);
+  assert.equal(firstBatter.atBats, 1);
+  assert.equal(firstBatter.hits, 1);
+  assert.equal(firstBatter.runs, 1);
+  assert.equal(firstBatter.average, 1);
+  assert.equal(homerBatter.homeRuns, 1);
+  assert.equal(homerBatter.runsBattedIn, 3);
+  assert.equal(homerBatter.sluggingPercentage, 4);
+  assert.equal(pitcher.games, 1);
+  assert.equal(pitcher.gamesStarted, 1);
+  assert.equal(pitcher.battersFaced, 6);
+  assert.equal(pitcher.outsRecorded, 3);
+  assert.equal(pitcher.hits, 3);
+  assert.equal(pitcher.earnedRunAverage, 27);
+  assert.equal(pitcher.walksHitsPerInningPitched, 3);
+});
+
+test("multiple games accumulate and game logs are queryable", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  playOneInningScriptedGame(world, game.id, ["SINGLE", "STRIKEOUT", "GROUND_OUT", "FLY_OUT"]);
+
+  const secondGame = scheduleSameSeasonGame(world, game, "2027-01-02");
+  prepareRosterForExistingGame(world, secondGame, "team_seoul", homePlayers);
+  prepareRosterForExistingGame(world, secondGame, "team_busan", awayPlayers);
+  world.advanceDay({ injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  playOneInningScriptedGame(world, secondGame.id, ["DOUBLE", "STRIKEOUT", "GROUND_OUT", "FLY_OUT"]);
+
+  const total = world.getPlayerBattingSeasonStats(awayPlayers[0], game.seasonId)[0];
+  const logs = world.getPlayerGameLogs(awayPlayers[0]);
+
+  assert.equal(total.games, 2);
+  assert.equal(total.atBats, 2);
+  assert.equal(total.hits, 2);
+  assert.equal(total.doubles, 1);
+  assert.equal(total.sluggingPercentage, 1.5);
+  assert.equal(logs.batting.length, 2);
+  assert.deepEqual(logs.batting.map((log) => log.gameId), [game.id, secondGame.id]);
+});
+
+test("season transfer keeps team splits and total season stats", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  const playerId = awayPlayers[0];
+  playOneInningScriptedGame(world, game.id, ["SINGLE", "STRIKEOUT", "GROUND_OUT", "FLY_OUT"]);
+
+  world.movePlayer(playerId, "team_seoul", "시즌 중 트레이드 테스트");
+  world.assignPlayerToRoster(playerId, "team_seoul", "ACTIVE", "이적 후 로스터 등록");
+  const secondGame = scheduleSameSeasonGame(world, game, "2027-01-02");
+  const newHomePlayers = [playerId, ...homePlayers.filter((id) => id !== playerId)];
+  prepareRosterForExistingGame(world, secondGame, "team_seoul", newHomePlayers);
+  prepareRosterForExistingGame(world, secondGame, "team_busan", awayPlayers.filter((id) => id !== playerId));
+  world.advanceDay({ injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  playOneInningScriptedGame(world, secondGame.id, ["GROUND_OUT", "FLY_OUT", "LINE_OUT"], ["DOUBLE", "GROUND_OUT", "FLY_OUT", "LINE_OUT"]);
+
+  const stats = world.getPlayerBattingSeasonStats(playerId, game.seasonId);
+  const total = stats.find((line) => line.split === "TOTAL");
+  const splits = stats.filter((line) => line.split === "TEAM");
+
+  assert.equal(total.games, 2);
+  assert.equal(total.hits, 2);
+  assert.deepEqual(splits.map((line) => [line.teamId, line.hits]).sort(), [["team_busan", 1], ["team_seoul", 1]]);
+});
+
+test("new seasons keep player stats separate while career totals combine them", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  const playerId = awayPlayers[0];
+  playOneInningScriptedGame(world, game.id, ["SINGLE", "GROUND_OUT", "FLY_OUT", "LINE_OUT"]);
+
+  const season2 = world.createSeason({
+    id: "season_lineup_2028-01-01",
+    leagueId: "league_kr1",
+    year: 2028,
+    name: "Lineup Test 2028",
+    startDate: "2028-01-01",
+    regularSeasonEndDate: "2028-10-01",
+    allowDraws: true,
+  });
+  const competition2 = world.createCompetition({
+    id: "competition_lineup_2028-01-01",
+    seasonId: season2.id,
+    leagueId: season2.leagueId,
+    name: "Lineup Competition 2028",
+    type: "REGULAR_SEASON",
+    startDate: season2.startDate,
+    endDate: season2.regularSeasonEndDate,
+    participatingTeamIds: ["team_seoul", "team_busan"],
+  });
+  const game2 = world.scheduleGame({
+    seasonId: season2.id,
+    competitionId: competition2.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2028-01-01",
+  });
+  prepareRosterForExistingGame(world, game2, "team_seoul", homePlayers);
+  prepareRosterForExistingGame(world, game2, "team_busan", awayPlayers);
+  world.advanceDays(365, { injuries: false, development: false, playerCareerOptions: () => [], managerCareerOptions: () => [] });
+  playOneInningScriptedGame(world, game2.id, ["HOME_RUN", "GROUND_OUT", "FLY_OUT", "LINE_OUT"]);
+
+  assert.equal(world.getPlayerBattingSeasonStats(playerId, game.seasonId)[0].homeRuns, 0);
+  assert.equal(world.getPlayerBattingSeasonStats(playerId, season2.id)[0].homeRuns, 1);
+  assert.equal(world.getPlayerCareerStats(playerId).batting.hits, 2);
+  assert.equal(world.getPlayerCareerStats(playerId, { leagueId: "league_kr1" }).batting.homeRuns, 1);
+});
+
+test("leaderboards sort batting and pitching categories with qualifications and stable ties", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: {
+      regulationInnings: 1,
+      allowExtraInnings: false,
+      battingQualificationPlateAppearances: 2,
+      pitchingQualificationOuts: 3,
+    },
+  });
+  playOneInningScriptedGame(world, game.id, ["HOME_RUN", "HOME_RUN", "SINGLE", "STRIKEOUT", "GROUND_OUT", "FLY_OUT"]);
+
+  const hrLeaders = world.getBattingLeaders(game.seasonId, "HR");
+  const qualifiedAvgLeaders = world.getBattingLeaders(game.seasonId, "AVG", { qualifiedOnly: true });
+  const eraLeaders = world.getPitchingLeaders(game.seasonId, "ERA", { qualifiedOnly: true });
+  const strikeoutLeaders = world.getPitchingLeaders(game.seasonId, "SO");
+
+  assert.deepEqual(hrLeaders.slice(0, 2).map((entry) => entry.playerId), [awayPlayers[1], awayPlayers[0]]);
+  assert.deepEqual(qualifiedAvgLeaders, []);
+  assert.equal(eraLeaders.at(-1).playerId, homePlayers.at(-1));
+  assert.equal(strikeoutLeaders[0].stats.strikeouts, 1);
+});
+
+test("manual score completion without a box score does not create player stats", () => {
+  const world = createWorld();
+  const { season, competition } = createRegularSeason(world);
+  const game = world.scheduleGame({
+    seasonId: season.id,
+    competitionId: competition.id,
+    homeTeamId: "team_seoul",
+    awayTeamId: "team_busan",
+    scheduledDate: "2027-04-06",
+  });
+
+  world.completeGame(game.id, { homeScore: 4, awayScore: 2 });
+
+  assert.equal(world.battingSeasonStats.size, 0);
+  assert.equal(world.pitchingSeasonStats.size, 0);
+  assert.equal(world.getStandings(season.id).reduce((sum, record) => sum + record.gamesPlayed, 0), 2);
+});
+
+test("completed game cannot be accumulated twice", () => {
+  const world = createWorld();
+  const { game } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  world.simulateGame(game.id);
+
+  assert.equal(world.accumulatedGameIds.has(game.id), true);
+  assert.throws(() => world.completeGame(game.id, { homeScore: 99, awayScore: 1 }), /already completed/);
+});
+
+test("milestone events are recorded for first hit, first homer, and first win", () => {
+  const world = createWorld();
+  const { game, awayPlayers, homePlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  playOneInningScriptedGame(world, game.id, ["HOME_RUN", "GROUND_OUT", "FLY_OUT", "LINE_OUT"]);
+
+  const milestones = world.events.filter((event) => event.type === "PLAYER_MILESTONE");
+  assert.ok(milestones.some((event) => event.subjectId === awayPlayers[0] && event.reason === "프로 첫 안타"));
+  assert.ok(milestones.some((event) => event.subjectId === awayPlayers[0] && event.reason === "프로 첫 홈런"));
+  assert.ok(milestones.some((event) => event.subjectId === awayPlayers[0] && event.reason === "시즌 10홈런") === false);
+  assert.ok(milestones.some((event) => event.subjectId === awayPlayers[0] && event.reason === "통산 100안타") === false);
+  assert.ok(milestones.some((event) => event.subjectId === awayPlayers.at(-1)) || milestones.some((event) => event.subjectId === homePlayers.at(-1)));
+});
+
+test("season stats invariants catch invalid local mutations", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  playOneInningScriptedGame(world, game.id, ["SINGLE", "GROUND_OUT", "FLY_OUT", "LINE_OUT"]);
+  const total = world.getPlayerBattingSeasonStats(awayPlayers[0], game.seasonId)[0];
+  world.battingSeasonStats.get(`${game.seasonId}:${awayPlayers[0]}:TOTAL:TOTAL`).hits = 10;
+  world.battingSeasonStats.get(`${game.seasonId}:${awayPlayers[0]}:TOTAL:TOTAL`).average = 99;
+
+  const issues = world.validateInvariants();
+  assert.ok(issues.some((issue) => issue.includes("H > AB")));
+  assert.ok(issues.some((issue) => issue.includes("derived rates are stale")));
+  assert.ok(issues.some((issue) => issue.includes("TOTAL hits does not match team splits")));
+  assert.equal(total.hits, 1);
 });

@@ -73,6 +73,10 @@ export type PlateAppearanceResult =
   | "FLY_OUT"
   | "LINE_OUT";
 
+export type BattingLeaderCategory = "AVG" | "HR" | "RBI" | "H" | "OPS";
+
+export type PitchingLeaderCategory = "ERA" | "W" | "SO" | "SV" | "WHIP";
+
 export type LeagueCategory =
   | "PROFESSIONAL"
   | "AMATEUR"
@@ -108,6 +112,7 @@ export type WorldEventType =
   | "GAME_ROSTER_CREATED"
   | "LINEUP_SET"
   | "STARTING_PITCHER_SET"
+  | "PLAYER_MILESTONE"
   | "SEASON_STARTED"
   | "SEASON_ENDED"
   | "GAME_PLAYED";

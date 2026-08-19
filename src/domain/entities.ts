@@ -2,6 +2,7 @@ import type {
   EntityId,
   BaseballPosition,
   BattingSide,
+  BattingLeaderCategory,
   BullpenRole,
   ContractStatus,
   CompetitionType,
@@ -15,6 +16,7 @@ import type {
   ManagerStatus,
   PersonType,
   PlateAppearanceResult,
+  PitchingLeaderCategory,
   PlayerStatus,
   RosterStatus,
   SeasonStatus,
@@ -40,6 +42,8 @@ export interface League {
   regulationInnings?: number;
   allowExtraInnings?: boolean;
   maxInnings?: number;
+  battingQualificationPlateAppearances?: number;
+  pitchingQualificationOuts?: number;
   gameRosterRules?: GameRosterRules;
 }
 
@@ -363,6 +367,102 @@ export interface PitcherGameLine {
   walks: number;
   strikeouts: number;
   homeRuns: number;
+}
+
+export interface PlayerBattingSeasonStats {
+  playerId: EntityId;
+  seasonId: EntityId;
+  teamId?: EntityId;
+  organizationId?: EntityId;
+  split: "TEAM" | "TOTAL";
+  games: number;
+  plateAppearances: number;
+  atBats: number;
+  runs: number;
+  hits: number;
+  doubles: number;
+  triples: number;
+  homeRuns: number;
+  runsBattedIn: number;
+  walks: number;
+  strikeouts: number;
+  average: number;
+  onBasePercentage: number;
+  sluggingPercentage: number;
+  onBasePlusSlugging: number;
+}
+
+export interface PlayerPitchingSeasonStats {
+  playerId: EntityId;
+  seasonId: EntityId;
+  teamId?: EntityId;
+  organizationId?: EntityId;
+  split: "TEAM" | "TOTAL";
+  games: number;
+  gamesStarted: number;
+  battersFaced: number;
+  outsRecorded: number;
+  hits: number;
+  runs: number;
+  earnedRuns: number;
+  walks: number;
+  strikeouts: number;
+  homeRuns: number;
+  wins: number;
+  losses: number;
+  saves: number;
+  holds: number;
+  inningsPitched: number;
+  earnedRunAverage: number;
+  walksHitsPerInningPitched: number;
+  strikeoutsPerNine: number;
+  walksPerNine: number;
+}
+
+export interface PlayerBattingGameLog extends BatterGameLine {
+  gameId: EntityId;
+  seasonId: EntityId;
+  date: ISODate;
+  opponentTeamId: EntityId;
+}
+
+export interface PlayerPitchingGameLog extends PitcherGameLine {
+  gameId: EntityId;
+  seasonId: EntityId;
+  date: ISODate;
+  opponentTeamId: EntityId;
+  gamesStarted: number;
+  wins: number;
+  losses: number;
+  saves: number;
+  holds: number;
+  inningsPitched: number;
+}
+
+export interface PlayerCareerStats {
+  playerId: EntityId;
+  leagueId?: EntityId;
+  teamId?: EntityId;
+  batting: Omit<PlayerBattingSeasonStats, "playerId" | "seasonId" | "teamId" | "organizationId" | "split">;
+  pitching: Omit<PlayerPitchingSeasonStats, "playerId" | "seasonId" | "teamId" | "organizationId" | "split">;
+}
+
+export interface BattingLeaderboardEntry {
+  playerId: EntityId;
+  seasonId: EntityId;
+  teamId?: EntityId;
+  value: number;
+  stats: PlayerBattingSeasonStats;
+  qualified: boolean;
+}
+
+export interface PitchingLeaderboardEntry {
+  playerId: EntityId;
+  seasonId: EntityId;
+  teamId?: EntityId;
+  value: number;
+  stats: PlayerPitchingSeasonStats;
+  qualified: boolean;
 }
 
 export interface StandingRecord {

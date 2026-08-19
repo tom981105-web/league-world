@@ -4,6 +4,7 @@ import type {
   BoxScore,
   BullpenAssignment,
   BatterGameLine,
+  BattingLeaderboardEntry,
   Competition,
   Country,
   GameDayRoster,
@@ -14,8 +15,14 @@ import type {
   LiveGame,
   Manager,
   Organization,
+  PlayerBattingGameLog,
+  PlayerBattingSeasonStats,
+  PlayerCareerStats,
   PitchingRotation,
+  PitchingLeaderboardEntry,
   PitcherGameLine,
+  PlayerPitchingGameLog,
+  PlayerPitchingSeasonStats,
   PlayByPlayEvent,
   PlayerContract,
   PlayerDevelopmentProfile,
@@ -32,12 +39,14 @@ import type {
   CompetitionType,
   EntityId,
   BaseballPosition,
+  BattingLeaderCategory,
   BullpenRole,
   GameHalf,
   GameStatus,
   InjurySeverity,
   ISODate,
   PlateAppearanceResult,
+  PitchingLeaderCategory,
   PersonType,
   RosterStatus,
   WorldEventType,
@@ -140,6 +149,12 @@ export class LeagueWorld {
   readonly gameRosters = new Map<EntityId, GameDayRoster>();
   readonly liveGames = new Map<EntityId, LiveGame>();
   readonly boxScores = new Map<EntityId, BoxScore>();
+  readonly accumulatedGameIds = new Set<EntityId>();
+  readonly battingSeasonStats = new Map<string, PlayerBattingSeasonStats>();
+  readonly pitchingSeasonStats = new Map<string, PlayerPitchingSeasonStats>();
+  readonly battingGameLogs: PlayerBattingGameLog[] = [];
+  readonly pitchingGameLogs: PlayerPitchingGameLog[] = [];
+  readonly milestoneKeys = new Set<string>();
   readonly pitchingRotations = new Map<EntityId, PitchingRotation>();
   readonly bullpenAssignments = new Map<EntityId, Map<EntityId, BullpenAssignment>>();
   readonly standings = new Map<EntityId, Map<EntityId, StandingRecord>>();
@@ -342,6 +357,111 @@ export class LeagueWorld {
     return [...(this.standings.get(seasonId)?.values() ?? [])]
       .map((record) => structuredClone(record))
       .sort((a, b) => b.winningPercentage - a.winningPercentage || a.gamesBehind - b.gamesBehind);
+  }
+
+  getPlayerBattingSeasonStats(playerId: EntityId, seasonId: EntityId): PlayerBattingSeasonStats[] {
+    this.requirePlayer(playerId);
+    this.requireSeason(seasonId);
+    return [...this.battingSeasonStats.values()]
+      .filter((stats) => stats.playerId === playerId && stats.seasonId === seasonId)
+      .map((stats) => structuredClone(stats))
+      .sort((a, b) => (a.split === "TOTAL" ? -1 : b.split === "TOTAL" ? 1 : (a.teamId ?? "").localeCompare(b.teamId ?? "")));
+  }
+
+  getPlayerPitchingSeasonStats(playerId: EntityId, seasonId: EntityId): PlayerPitchingSeasonStats[] {
+    this.requirePlayer(playerId);
+    this.requireSeason(seasonId);
+    return [...this.pitchingSeasonStats.values()]
+      .filter((stats) => stats.playerId === playerId && stats.seasonId === seasonId)
+      .map((stats) => structuredClone(stats))
+      .sort((a, b) => (a.split === "TOTAL" ? -1 : b.split === "TOTAL" ? 1 : (a.teamId ?? "").localeCompare(b.teamId ?? "")));
+  }
+
+  getPlayerGameLogs(playerId: EntityId): {
+    batting: PlayerBattingGameLog[];
+    pitching: PlayerPitchingGameLog[];
+  } {
+    this.requirePlayer(playerId);
+    return {
+      batting: this.battingGameLogs.filter((log) => log.playerId === playerId).map((log) => structuredClone(log)),
+      pitching: this.pitchingGameLogs.filter((log) => log.playerId === playerId).map((log) => structuredClone(log)),
+    };
+  }
+
+  getPlayerCareerStats(
+    playerId: EntityId,
+    filters: { leagueId?: EntityId; teamId?: EntityId } = {},
+  ): PlayerCareerStats {
+    this.requirePlayer(playerId);
+    const battingStats = [...this.battingSeasonStats.values()].filter(
+      (stats) =>
+        stats.playerId === playerId &&
+        stats.split === (filters.teamId ? "TEAM" : "TOTAL") &&
+        (!filters.teamId || stats.teamId === filters.teamId) &&
+        (!filters.leagueId || this.requireSeason(stats.seasonId).leagueId === filters.leagueId),
+    );
+    const pitchingStats = [...this.pitchingSeasonStats.values()].filter(
+      (stats) =>
+        stats.playerId === playerId &&
+        stats.split === (filters.teamId ? "TEAM" : "TOTAL") &&
+        (!filters.teamId || stats.teamId === filters.teamId) &&
+        (!filters.leagueId || this.requireSeason(stats.seasonId).leagueId === filters.leagueId),
+    );
+    return {
+      playerId,
+      ...(filters.leagueId ? { leagueId: filters.leagueId } : {}),
+      ...(filters.teamId ? { teamId: filters.teamId } : {}),
+      batting: this.deriveBattingTotals(this.sumBattingStats(battingStats)),
+      pitching: this.derivePitchingTotals(this.sumPitchingStats(pitchingStats)),
+    };
+  }
+
+  getBattingLeaders(
+    seasonId: EntityId,
+    category: BattingLeaderCategory,
+    options: { qualifiedOnly?: boolean; limit?: number } = {},
+  ): BattingLeaderboardEntry[] {
+    const season = this.requireSeason(seasonId);
+    const league = this.requireLeague(season.leagueId);
+    const minimumPlateAppearances = league.battingQualificationPlateAppearances ?? 0;
+    const entries = [...this.battingSeasonStats.values()]
+      .filter((stats) => stats.seasonId === seasonId && stats.split === "TOTAL")
+      .map((stats) => ({
+        playerId: stats.playerId,
+        seasonId,
+        value: this.battingLeaderValue(stats, category),
+        stats: structuredClone(stats),
+        qualified: stats.plateAppearances >= minimumPlateAppearances,
+      }))
+      .filter((entry) => !options.qualifiedOnly || entry.qualified)
+      .sort((a, b) => b.value - a.value || b.stats.plateAppearances - a.stats.plateAppearances || a.playerId.localeCompare(b.playerId));
+    return entries.slice(0, options.limit ?? entries.length);
+  }
+
+  getPitchingLeaders(
+    seasonId: EntityId,
+    category: PitchingLeaderCategory,
+    options: { qualifiedOnly?: boolean; limit?: number } = {},
+  ): PitchingLeaderboardEntry[] {
+    const season = this.requireSeason(seasonId);
+    const league = this.requireLeague(season.leagueId);
+    const minimumOuts = league.pitchingQualificationOuts ?? 0;
+    const lowerIsBetter = category === "ERA" || category === "WHIP";
+    const entries = [...this.pitchingSeasonStats.values()]
+      .filter((stats) => stats.seasonId === seasonId && stats.split === "TOTAL")
+      .map((stats) => ({
+        playerId: stats.playerId,
+        seasonId,
+        value: this.pitchingLeaderValue(stats, category),
+        stats: structuredClone(stats),
+        qualified: stats.outsRecorded >= minimumOuts,
+      }))
+      .filter((entry) => !options.qualifiedOnly || entry.qualified)
+      .sort((a, b) => {
+        const valueOrder = lowerIsBetter ? a.value - b.value : b.value - a.value;
+        return valueOrder || b.stats.outsRecorded - a.stats.outsRecorded || a.playerId.localeCompare(b.playerId);
+      });
+    return entries.slice(0, options.limit ?? entries.length);
   }
 
   createGameRoster(input: GameDayRosterInput): GameDayRoster {
@@ -1298,6 +1418,7 @@ export class LeagueWorld {
     for (const boxScore of this.boxScores.values()) {
       this.validateCompletedBoxScore(boxScore, issues);
     }
+    this.validatePlayerStatsInvariants(issues);
   }
 
   private validateGameRosterState(roster: GameDayRoster, issues: string[]): void {
@@ -1399,18 +1520,21 @@ export class LeagueWorld {
       issues.push(`Game roster ${roster.id} has missing player ${playerId}`);
       return;
     }
-    if (player.currentTeamId !== roster.teamId) {
-      issues.push(`Game roster ${roster.id} player ${playerId} is not on team ${roster.teamId}`);
-    }
-    const team = this.teams.get(roster.teamId);
-    if (team?.organizationId && player.currentOrganizationId !== team.organizationId) {
-      issues.push(`Game roster ${roster.id} player ${playerId} organization does not match team`);
-    }
-    if (player.status === "RETIRED") {
-      issues.push(`Game roster ${roster.id} player ${playerId} is retired`);
-    }
-    if (!this.isPlayerAvailableForGame(player)) {
-      issues.push(`Game roster ${roster.id} player ${playerId} is not available for game`);
+    const game = this.games.get(roster.gameId);
+    if (game?.status !== "COMPLETED") {
+      if (player.currentTeamId !== roster.teamId) {
+        issues.push(`Game roster ${roster.id} player ${playerId} is not on team ${roster.teamId}`);
+      }
+      const team = this.teams.get(roster.teamId);
+      if (team?.organizationId && player.currentOrganizationId !== team.organizationId) {
+        issues.push(`Game roster ${roster.id} player ${playerId} organization does not match team`);
+      }
+      if (player.status === "RETIRED") {
+        issues.push(`Game roster ${roster.id} player ${playerId} is retired`);
+      }
+      if (!this.isPlayerAvailableForGame(player)) {
+        issues.push(`Game roster ${roster.id} player ${playerId} is not available for game`);
+      }
     }
   }
 
@@ -1509,6 +1633,83 @@ export class LeagueWorld {
     for (const line of Object.values(boxScore.pitchers)) {
       if (line.hits > line.battersFaced || line.walks > line.battersFaced || line.strikeouts > line.outsRecorded) {
         issues.push(`Pitcher line ${line.playerId} has impossible pitching totals`);
+      }
+    }
+  }
+
+  private validatePlayerStatsInvariants(issues: string[]): void {
+    for (const stats of this.battingSeasonStats.values()) {
+      if (!this.players.has(stats.playerId)) issues.push(`Batting stats have missing player ${stats.playerId}`);
+      if (!this.seasons.has(stats.seasonId)) issues.push(`Batting stats have missing season ${stats.seasonId}`);
+      if (stats.teamId && !this.teams.has(stats.teamId)) issues.push(`Batting stats have missing team ${stats.teamId}`);
+      for (const [key, value] of Object.entries(stats)) {
+        if (typeof value === "number" && value < 0) issues.push(`Batting stats ${stats.playerId} ${key} is negative`);
+      }
+      if (stats.hits > stats.atBats) issues.push(`Batting stats ${stats.playerId} has H > AB`);
+      if (stats.doubles + stats.triples + stats.homeRuns > stats.hits) {
+        issues.push(`Batting stats ${stats.playerId} extra-base hits exceed hits`);
+      }
+      if (stats.atBats > stats.plateAppearances) issues.push(`Batting stats ${stats.playerId} has AB > PA`);
+      if (stats.walks + stats.atBats > stats.plateAppearances) {
+        issues.push(`Batting stats ${stats.playerId} has AB + BB > PA`);
+      }
+      const derived = this.ensureStandaloneBattingStats(stats.playerId, stats.seasonId);
+      Object.assign(derived, { ...stats });
+      this.refreshBattingDerived(derived);
+      if (
+        derived.average !== stats.average ||
+        derived.onBasePercentage !== stats.onBasePercentage ||
+        derived.sluggingPercentage !== stats.sluggingPercentage ||
+        derived.onBasePlusSlugging !== stats.onBasePlusSlugging
+      ) {
+        issues.push(`Batting stats ${stats.playerId} derived rates are stale`);
+      }
+    }
+    for (const stats of this.pitchingSeasonStats.values()) {
+      if (!this.players.has(stats.playerId)) issues.push(`Pitching stats have missing player ${stats.playerId}`);
+      if (!this.seasons.has(stats.seasonId)) issues.push(`Pitching stats have missing season ${stats.seasonId}`);
+      if (stats.teamId && !this.teams.has(stats.teamId)) issues.push(`Pitching stats have missing team ${stats.teamId}`);
+      for (const [key, value] of Object.entries(stats)) {
+        if (typeof value === "number" && value < 0) issues.push(`Pitching stats ${stats.playerId} ${key} is negative`);
+      }
+      if (stats.hits > stats.battersFaced) issues.push(`Pitching stats ${stats.playerId} has H > BF`);
+      if (stats.walks > stats.battersFaced) issues.push(`Pitching stats ${stats.playerId} has BB > BF`);
+      const derived = this.ensureStandalonePitchingStats(stats.playerId, stats.seasonId);
+      Object.assign(derived, { ...stats });
+      this.refreshPitchingDerived(derived);
+      if (
+        derived.inningsPitched !== stats.inningsPitched ||
+        derived.earnedRunAverage !== stats.earnedRunAverage ||
+        derived.walksHitsPerInningPitched !== stats.walksHitsPerInningPitched ||
+        derived.strikeoutsPerNine !== stats.strikeoutsPerNine ||
+        derived.walksPerNine !== stats.walksPerNine
+      ) {
+        issues.push(`Pitching stats ${stats.playerId} derived rates are stale`);
+      }
+    }
+    this.validateSplitTotals(this.battingSeasonStats, issues, "batting");
+    this.validateSplitTotals(this.pitchingSeasonStats, issues, "pitching");
+  }
+
+  private validateSplitTotals<T extends PlayerBattingSeasonStats | PlayerPitchingSeasonStats>(
+    statsMap: Map<string, T>,
+    issues: string[],
+    label: string,
+  ): void {
+    const totals = [...statsMap.values()].filter((stats) => stats.split === "TOTAL");
+    for (const total of totals) {
+      const splits = [...statsMap.values()].filter(
+        (stats) => stats.playerId === total.playerId && stats.seasonId === total.seasonId && stats.split === "TEAM",
+      );
+      if (splits.length === 0) continue;
+      const numericKeys = Object.entries(total)
+        .filter(([key, value]) => typeof value === "number" && !this.isDerivedStatKey(key))
+        .map(([key]) => key);
+      for (const key of numericKeys) {
+        const splitSum = splits.reduce((sum, stats) => sum + (stats[key as keyof T] as number), 0);
+        if ((total[key as keyof T] as number) !== splitSum) {
+          issues.push(`${label} stats ${total.playerId} ${total.seasonId} TOTAL ${key} does not match team splits`);
+        }
       }
     }
   }
@@ -1671,6 +1872,413 @@ export class LeagueWorld {
 
   private isBullpenRole(role: string): role is BullpenRole {
     return ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"].includes(role);
+  }
+
+  private accumulateGameStats(game: GameFixture, boxScore: BoxScore): void {
+    if (this.accumulatedGameIds.has(game.id)) {
+      throw new Error(`Game stats already accumulated: ${game.id}`);
+    }
+    const decisions = this.decidePitchingOutcomes(game, boxScore);
+    for (const line of Object.values(boxScore.batters)) {
+      const opponentTeamId = line.teamId === game.homeTeamId ? game.awayTeamId : game.homeTeamId;
+      const log: PlayerBattingGameLog = {
+        ...structuredClone(line),
+        gameId: game.id,
+        seasonId: game.seasonId,
+        date: game.scheduledDate,
+        opponentTeamId,
+      };
+      this.battingGameLogs.push(log);
+      this.addBattingLineToSeasonStats(game.seasonId, line);
+    }
+    for (const line of Object.values(boxScore.pitchers)) {
+      const opponentTeamId = line.teamId === game.homeTeamId ? game.awayTeamId : game.homeTeamId;
+      const gamesStarted = this.wasStartingPitcher(game.id, line.teamId, line.playerId) ? 1 : 0;
+      const log: PlayerPitchingGameLog = {
+        ...structuredClone(line),
+        gameId: game.id,
+        seasonId: game.seasonId,
+        date: game.scheduledDate,
+        opponentTeamId,
+        gamesStarted,
+        wins: decisions.winningPitcherId === line.playerId ? 1 : 0,
+        losses: decisions.losingPitcherId === line.playerId ? 1 : 0,
+        saves: decisions.savePitcherId === line.playerId ? 1 : 0,
+        holds: 0,
+        inningsPitched: this.outsToInnings(line.outsRecorded),
+      };
+      this.pitchingGameLogs.push(log);
+      this.addPitchingLineToSeasonStats(game.seasonId, line, {
+        gamesStarted,
+        wins: log.wins,
+        losses: log.losses,
+        saves: log.saves,
+        holds: 0,
+      });
+    }
+    this.accumulatedGameIds.add(game.id);
+    this.recordMilestones(game, boxScore, decisions);
+  }
+
+  private addBattingLineToSeasonStats(seasonId: EntityId, line: BatterGameLine): void {
+    const player = this.requirePlayer(line.playerId);
+    const team = this.requireTeam(line.teamId);
+    const addTo = (stats: PlayerBattingSeasonStats): void => {
+      stats.games += 1;
+      stats.plateAppearances += line.plateAppearances;
+      stats.atBats += line.atBats;
+      stats.runs += line.runs;
+      stats.hits += line.hits;
+      stats.doubles += line.doubles;
+      stats.triples += line.triples;
+      stats.homeRuns += line.homeRuns;
+      stats.runsBattedIn += line.runsBattedIn;
+      stats.walks += line.walks;
+      stats.strikeouts += line.strikeouts;
+      this.refreshBattingDerived(stats);
+    };
+    addTo(this.ensureBattingSeasonStats(player.id, seasonId, "TOTAL"));
+    addTo(this.ensureBattingSeasonStats(player.id, seasonId, "TEAM", line.teamId, team.organizationId));
+  }
+
+  private addPitchingLineToSeasonStats(
+    seasonId: EntityId,
+    line: PitcherGameLine,
+    decisions: Pick<PlayerPitchingSeasonStats, "gamesStarted" | "wins" | "losses" | "saves" | "holds">,
+  ): void {
+    const player = this.requirePlayer(line.playerId);
+    const team = this.requireTeam(line.teamId);
+    const addTo = (stats: PlayerPitchingSeasonStats): void => {
+      stats.games += 1;
+      stats.gamesStarted += decisions.gamesStarted;
+      stats.battersFaced += line.battersFaced;
+      stats.outsRecorded += line.outsRecorded;
+      stats.hits += line.hits;
+      stats.runs += line.runs;
+      stats.earnedRuns += line.earnedRuns;
+      stats.walks += line.walks;
+      stats.strikeouts += line.strikeouts;
+      stats.homeRuns += line.homeRuns;
+      stats.wins += decisions.wins;
+      stats.losses += decisions.losses;
+      stats.saves += decisions.saves;
+      stats.holds += decisions.holds;
+      this.refreshPitchingDerived(stats);
+    };
+    addTo(this.ensurePitchingSeasonStats(player.id, seasonId, "TOTAL"));
+    addTo(this.ensurePitchingSeasonStats(player.id, seasonId, "TEAM", line.teamId, team.organizationId));
+  }
+
+  private ensureBattingSeasonStats(
+    playerId: EntityId,
+    seasonId: EntityId,
+    split: "TEAM" | "TOTAL",
+    teamId?: EntityId,
+    organizationId?: EntityId,
+  ): PlayerBattingSeasonStats {
+    const key = this.statsKey(seasonId, playerId, split, teamId);
+    const existing = this.battingSeasonStats.get(key);
+    if (existing) return existing;
+    const stats: PlayerBattingSeasonStats = {
+      playerId,
+      seasonId,
+      ...(teamId ? { teamId } : {}),
+      ...(organizationId ? { organizationId } : {}),
+      split,
+      games: 0,
+      plateAppearances: 0,
+      atBats: 0,
+      runs: 0,
+      hits: 0,
+      doubles: 0,
+      triples: 0,
+      homeRuns: 0,
+      runsBattedIn: 0,
+      walks: 0,
+      strikeouts: 0,
+      average: 0,
+      onBasePercentage: 0,
+      sluggingPercentage: 0,
+      onBasePlusSlugging: 0,
+    };
+    this.battingSeasonStats.set(key, stats);
+    return stats;
+  }
+
+  private ensurePitchingSeasonStats(
+    playerId: EntityId,
+    seasonId: EntityId,
+    split: "TEAM" | "TOTAL",
+    teamId?: EntityId,
+    organizationId?: EntityId,
+  ): PlayerPitchingSeasonStats {
+    const key = this.statsKey(seasonId, playerId, split, teamId);
+    const existing = this.pitchingSeasonStats.get(key);
+    if (existing) return existing;
+    const stats: PlayerPitchingSeasonStats = {
+      playerId,
+      seasonId,
+      ...(teamId ? { teamId } : {}),
+      ...(organizationId ? { organizationId } : {}),
+      split,
+      games: 0,
+      gamesStarted: 0,
+      battersFaced: 0,
+      outsRecorded: 0,
+      hits: 0,
+      runs: 0,
+      earnedRuns: 0,
+      walks: 0,
+      strikeouts: 0,
+      homeRuns: 0,
+      wins: 0,
+      losses: 0,
+      saves: 0,
+      holds: 0,
+      inningsPitched: 0,
+      earnedRunAverage: 0,
+      walksHitsPerInningPitched: 0,
+      strikeoutsPerNine: 0,
+      walksPerNine: 0,
+    };
+    this.pitchingSeasonStats.set(key, stats);
+    return stats;
+  }
+
+  private refreshBattingDerived(stats: PlayerBattingSeasonStats): void {
+    const totalBases = stats.hits + stats.doubles + stats.triples * 2 + stats.homeRuns * 3;
+    stats.average = this.roundRate(stats.atBats === 0 ? 0 : stats.hits / stats.atBats);
+    stats.onBasePercentage = this.roundRate(
+      stats.plateAppearances === 0 ? 0 : (stats.hits + stats.walks) / stats.plateAppearances,
+    );
+    stats.sluggingPercentage = this.roundRate(stats.atBats === 0 ? 0 : totalBases / stats.atBats);
+    stats.onBasePlusSlugging = this.roundRate(stats.onBasePercentage + stats.sluggingPercentage);
+  }
+
+  private refreshPitchingDerived(stats: PlayerPitchingSeasonStats): void {
+    const innings = stats.outsRecorded / 3;
+    stats.inningsPitched = this.outsToInnings(stats.outsRecorded);
+    stats.earnedRunAverage = this.roundRate(stats.outsRecorded === 0 ? 0 : (stats.earnedRuns * 27) / stats.outsRecorded);
+    stats.walksHitsPerInningPitched = this.roundRate(innings === 0 ? 0 : (stats.walks + stats.hits) / innings);
+    stats.strikeoutsPerNine = this.roundRate(stats.outsRecorded === 0 ? 0 : (stats.strikeouts * 27) / stats.outsRecorded);
+    stats.walksPerNine = this.roundRate(stats.outsRecorded === 0 ? 0 : (stats.walks * 27) / stats.outsRecorded);
+  }
+
+  private sumBattingStats(statsList: PlayerBattingSeasonStats[]): PlayerBattingSeasonStats {
+    const total = this.ensureStandaloneBattingStats("__career__", "__career__");
+    for (const stats of statsList) {
+      total.games += stats.games;
+      total.plateAppearances += stats.plateAppearances;
+      total.atBats += stats.atBats;
+      total.runs += stats.runs;
+      total.hits += stats.hits;
+      total.doubles += stats.doubles;
+      total.triples += stats.triples;
+      total.homeRuns += stats.homeRuns;
+      total.runsBattedIn += stats.runsBattedIn;
+      total.walks += stats.walks;
+      total.strikeouts += stats.strikeouts;
+    }
+    this.refreshBattingDerived(total);
+    return total;
+  }
+
+  private sumPitchingStats(statsList: PlayerPitchingSeasonStats[]): PlayerPitchingSeasonStats {
+    const total = this.ensureStandalonePitchingStats("__career__", "__career__");
+    for (const stats of statsList) {
+      total.games += stats.games;
+      total.gamesStarted += stats.gamesStarted;
+      total.battersFaced += stats.battersFaced;
+      total.outsRecorded += stats.outsRecorded;
+      total.hits += stats.hits;
+      total.runs += stats.runs;
+      total.earnedRuns += stats.earnedRuns;
+      total.walks += stats.walks;
+      total.strikeouts += stats.strikeouts;
+      total.homeRuns += stats.homeRuns;
+      total.wins += stats.wins;
+      total.losses += stats.losses;
+      total.saves += stats.saves;
+      total.holds += stats.holds;
+    }
+    this.refreshPitchingDerived(total);
+    return total;
+  }
+
+  private deriveBattingTotals(
+    stats: PlayerBattingSeasonStats,
+  ): PlayerCareerStats["batting"] {
+    const { playerId: _playerId, seasonId: _seasonId, teamId: _teamId, organizationId: _organizationId, split: _split, ...totals } = stats;
+    return totals;
+  }
+
+  private derivePitchingTotals(
+    stats: PlayerPitchingSeasonStats,
+  ): PlayerCareerStats["pitching"] {
+    const { playerId: _playerId, seasonId: _seasonId, teamId: _teamId, organizationId: _organizationId, split: _split, ...totals } = stats;
+    return totals;
+  }
+
+  private ensureStandaloneBattingStats(playerId: EntityId, seasonId: EntityId): PlayerBattingSeasonStats {
+    return {
+      playerId,
+      seasonId,
+      split: "TOTAL",
+      games: 0,
+      plateAppearances: 0,
+      atBats: 0,
+      runs: 0,
+      hits: 0,
+      doubles: 0,
+      triples: 0,
+      homeRuns: 0,
+      runsBattedIn: 0,
+      walks: 0,
+      strikeouts: 0,
+      average: 0,
+      onBasePercentage: 0,
+      sluggingPercentage: 0,
+      onBasePlusSlugging: 0,
+    };
+  }
+
+  private ensureStandalonePitchingStats(playerId: EntityId, seasonId: EntityId): PlayerPitchingSeasonStats {
+    return {
+      playerId,
+      seasonId,
+      split: "TOTAL",
+      games: 0,
+      gamesStarted: 0,
+      battersFaced: 0,
+      outsRecorded: 0,
+      hits: 0,
+      runs: 0,
+      earnedRuns: 0,
+      walks: 0,
+      strikeouts: 0,
+      homeRuns: 0,
+      wins: 0,
+      losses: 0,
+      saves: 0,
+      holds: 0,
+      inningsPitched: 0,
+      earnedRunAverage: 0,
+      walksHitsPerInningPitched: 0,
+      strikeoutsPerNine: 0,
+      walksPerNine: 0,
+    };
+  }
+
+  private decidePitchingOutcomes(
+    game: GameFixture,
+    boxScore: BoxScore,
+  ): { winningPitcherId?: EntityId; losingPitcherId?: EntityId; savePitcherId?: EntityId } {
+    if (!game.result || game.result.homeScore === game.result.awayScore) return {};
+    const winningTeamId = game.result.homeScore > game.result.awayScore ? game.homeTeamId : game.awayTeamId;
+    const losingTeamId = winningTeamId === game.homeTeamId ? game.awayTeamId : game.homeTeamId;
+    const winningPitcherId = this.bestDecisionPitcher(boxScore, winningTeamId);
+    const losingPitcherId = this.bestDecisionPitcher(boxScore, losingTeamId);
+    return {
+      ...(winningPitcherId ? { winningPitcherId } : {}),
+      ...(losingPitcherId ? { losingPitcherId } : {}),
+    };
+  }
+
+  private bestDecisionPitcher(boxScore: BoxScore, teamId: EntityId): EntityId | undefined {
+    return Object.values(boxScore.pitchers)
+      .filter((line) => line.teamId === teamId)
+      .sort((a, b) => b.outsRecorded - a.outsRecorded || b.battersFaced - a.battersFaced || a.playerId.localeCompare(b.playerId))[0]?.playerId;
+  }
+
+  private recordMilestones(
+    game: GameFixture,
+    boxScore: BoxScore,
+    decisions: { winningPitcherId?: EntityId },
+  ): void {
+    for (const line of Object.values(boxScore.batters)) {
+      if (line.hits > 0) this.recordMilestoneOnce(line.playerId, "FIRST_HIT", game, "프로 첫 안타");
+      if (line.homeRuns > 0) this.recordMilestoneOnce(line.playerId, "FIRST_HOME_RUN", game, "프로 첫 홈런");
+      const total = this.battingSeasonStats.get(this.statsKey(game.seasonId, line.playerId, "TOTAL"));
+      if (total) {
+        for (const mark of [10, 20, 30, 40]) {
+          if (total.homeRuns >= mark && total.homeRuns - line.homeRuns < mark) {
+            this.recordMilestoneOnce(line.playerId, `SEASON_${mark}_HR:${game.seasonId}`, game, `시즌 ${mark}홈런`);
+          }
+        }
+      }
+      const career = this.getPlayerCareerStats(line.playerId);
+      for (const mark of [100, 500, 1000]) {
+        if (career.batting.hits >= mark && career.batting.hits - line.hits < mark) {
+          this.recordMilestoneOnce(line.playerId, `CAREER_${mark}_H`, game, `통산 ${mark}안타`);
+        }
+      }
+    }
+    if (decisions.winningPitcherId) {
+      this.recordMilestoneOnce(decisions.winningPitcherId, "FIRST_WIN", game, "프로 첫 승");
+    }
+  }
+
+  private recordMilestoneOnce(playerId: EntityId, milestone: string, game: GameFixture, reason: string): void {
+    const key = `${playerId}:${milestone}`;
+    if (this.milestoneKeys.has(key)) return;
+    this.milestoneKeys.add(key);
+    this.record("PLAYER_MILESTONE", {
+      subjectId: playerId,
+      ...(this.players.get(playerId)?.currentTeamId ? { teamId: this.players.get(playerId)!.currentTeamId } : {}),
+      reason,
+      payload: { milestone, gameId: game.id, seasonId: game.seasonId },
+    });
+  }
+
+  private wasStartingPitcher(gameId: EntityId, teamId: EntityId, playerId: EntityId): boolean {
+    return this.findGameRoster(gameId, teamId)?.startingPitcherId === playerId;
+  }
+
+  private battingLeaderValue(stats: PlayerBattingSeasonStats, category: BattingLeaderCategory): number {
+    if (category === "AVG") return stats.average;
+    if (category === "HR") return stats.homeRuns;
+    if (category === "RBI") return stats.runsBattedIn;
+    if (category === "H") return stats.hits;
+    return stats.onBasePlusSlugging;
+  }
+
+  private pitchingLeaderValue(stats: PlayerPitchingSeasonStats, category: PitchingLeaderCategory): number {
+    if (category === "ERA") return stats.earnedRunAverage;
+    if (category === "W") return stats.wins;
+    if (category === "SO") return stats.strikeouts;
+    if (category === "SV") return stats.saves;
+    return stats.walksHitsPerInningPitched;
+  }
+
+  private statsKey(
+    seasonId: EntityId,
+    playerId: EntityId,
+    split: "TEAM" | "TOTAL",
+    teamId?: EntityId,
+  ): string {
+    return `${seasonId}:${playerId}:${split}:${teamId ?? "TOTAL"}`;
+  }
+
+  private outsToInnings(outs: number): number {
+    return Math.floor(outs / 3) + (outs % 3) / 10;
+  }
+
+  private roundRate(value: number): number {
+    return Math.round(value * 1000) / 1000;
+  }
+
+  private isDerivedStatKey(key: string): boolean {
+    return [
+      "average",
+      "onBasePercentage",
+      "sluggingPercentage",
+      "onBasePlusSlugging",
+      "inningsPitched",
+      "earnedRunAverage",
+      "walksHitsPerInningPitched",
+      "strikeoutsPerNine",
+      "walksPerNine",
+    ].includes(key);
   }
 
   private requireLiveGame(gameId: EntityId): LiveGame {
@@ -1947,7 +2555,10 @@ export class LeagueWorld {
   ): GameFixture {
     game.result = structuredClone(result);
     game.status = "COMPLETED";
-    if (boxScore) this.boxScores.set(game.id, structuredClone(boxScore));
+    if (boxScore) {
+      this.boxScores.set(game.id, structuredClone(boxScore));
+      this.accumulateGameStats(game, boxScore);
+    }
     this.recalculateStandings(game.seasonId);
     this.record("GAME_COMPLETED", {
       subjectId: game.id,
