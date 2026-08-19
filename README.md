@@ -38,3 +38,27 @@
 현재 저장소는 화면보다 먼저 도메인과 시뮬레이션 규칙을 고정하기 위한 초기 뼈대입니다.
 
 다음 구현 우선순위는 `docs/ROADMAP.md`를 참고하세요.
+
+## LEAGUE Web v0.1 실행
+
+브라우저에서 현재 World Engine을 직접 보고 조작하는 개발용 UI가 포함되어 있습니다.
+상태는 브라우저 메모리에서 동작하며 새로고침하면 같은 seed의 개발용 세계로 다시 생성됩니다.
+
+```powershell
+npm install
+npm run dev
+```
+
+기본 접속 주소:
+
+```text
+http://localhost:5173
+```
+
+검증 명령:
+
+```powershell
+npm run typecheck
+npm test
+npm run build
+```

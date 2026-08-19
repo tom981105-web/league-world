@@ -1,0 +1,187 @@
+- generic [ref=f7e3]:
+  - complementary [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - generic [ref=f7e6]: LW
+      - generic [ref=f7e7]:
+        - strong [ref=f7e8]: LEAGUE
+        - generic [ref=f7e9]: 웹 v0.1
+    - navigation [ref=f7e10]:
+      - button "홈" [ref=f7e11] [cursor=pointer]
+      - button "감독" [ref=f7e16] [cursor=pointer]
+      - button "경기" [ref=f7e21] [cursor=pointer]
+      - button "순위" [ref=f7e25] [cursor=pointer]
+      - button "구단" [ref=f7e29] [cursor=pointer]
+      - button "선수" [ref=f7e33] [cursor=pointer]
+      - button "유망주" [ref=f7e39] [cursor=pointer]
+      - button "드래프트" [ref=f7e44] [cursor=pointer]
+      - button "이적시장" [ref=f7e50] [cursor=pointer]
+      - button "이벤트" [ref=f7e57] [cursor=pointer]
+    - group [ref=f7e62]:
+      - generic "디버그" [ref=f7e63] [cursor=pointer]
+      - generic [ref=f7e64]:
+        - text: 시드
+        - spinbutton "시드" [ref=f7e65]: "20270403"
+      - generic [ref=f7e66]:
+        - generic [ref=f7e67]: 세계 날짜
+        - strong [ref=f7e68]: 2027. 4. 3.
+      - generic [ref=f7e69]:
+        - generic [ref=f7e70]: 선수 수
+        - strong [ref=f7e71]: "111"
+      - generic [ref=f7e72]:
+        - generic [ref=f7e73]: 팀 수
+        - strong [ref=f7e74]: "9"
+      - generic [ref=f7e75]:
+        - generic [ref=f7e76]: 조직 수
+        - strong [ref=f7e77]: "5"
+      - generic [ref=f7e78]:
+        - generic [ref=f7e79]: 일정 수
+        - strong [ref=f7e80]: "12"
+      - generic [ref=f7e81]:
+        - generic [ref=f7e82]: 이벤트 수
+        - strong [ref=f7e83]: "379"
+      - generic [ref=f7e84]:
+        - generic [ref=f7e85]: 진행 중 경기
+        - strong [ref=f7e86]: "0"
+      - generic [ref=f7e87]:
+        - button "검사" [ref=f7e88] [cursor=pointer]
+        - button "초기화" [ref=f7e93] [cursor=pointer]
+        - button "+1" [ref=f7e99] [cursor=pointer]
+        - button "+7" [ref=f7e100] [cursor=pointer]
+      - button "JSON 복사" [ref=f7e101] [cursor=pointer]
+  - main [ref=f7e107]:
+    - generic [ref=f7e108]:
+      - generic [ref=f7e109]:
+        - text: 세계 날짜
+        - heading "2027. 4. 3." [level=1] [ref=f7e110]
+      - generic [ref=f7e111]:
+        - button "+1일" [ref=f7e112] [cursor=pointer]
+        - button "+7일" [ref=f7e116] [cursor=pointer]
+        - button "+30일" [ref=f7e119] [cursor=pointer]
+    - generic [ref=f7e123]: 시드 세계가 준비되었습니다.
+    - generic [ref=f7e124]:
+      - generic [ref=f7e125]:
+        - heading "현재 시즌" [level=2] [ref=f7e126]
+        - generic [ref=f7e127]:
+          - generic [ref=f7e128]: 시즌
+          - strong [ref=f7e129]: 2027 한국 프리미어 리그
+        - generic [ref=f7e130]:
+          - generic [ref=f7e131]: 상태
+          - strong [ref=f7e132]: 정규시즌
+        - generic [ref=f7e133]:
+          - generic [ref=f7e134]: 경기 수
+          - strong [ref=f7e135]: "12"
+      - generic [ref=f7e136]:
+        - heading "오늘 경기" [level=2] [ref=f7e137]
+        - button "부산 타이즈 @ 서울 팰컨스 -" [ref=f7e139] [cursor=pointer]:
+          - generic [ref=f7e140]: 부산 타이즈 @ 서울 팰컨스
+          - strong [ref=f7e141]: "-"
+      - generic [ref=f7e142]:
+        - heading "리그 상위권" [level=2] [ref=f7e143]
+        - table [ref=f7e145]:
+          - rowgroup [ref=f7e146]:
+            - row [ref=f7e147]:
+              - columnheader "순위" [ref=f7e148]
+              - columnheader "팀" [ref=f7e149]
+              - columnheader "승" [ref=f7e150]
+              - columnheader "패" [ref=f7e151]
+              - columnheader "승률" [ref=f7e152]
+          - rowgroup [ref=f7e153]:
+            - row [ref=f7e154]:
+              - cell "1" [ref=f7e155]
+              - cell "서울 팰컨스" [ref=f7e156]
+              - cell "0" [ref=f7e157]
+              - cell "0" [ref=f7e158]
+              - cell "0.000" [ref=f7e159]
+            - row [ref=f7e160]:
+              - cell "2" [ref=f7e161]
+              - cell "부산 타이즈" [ref=f7e162]
+              - cell "0" [ref=f7e163]
+              - cell "0" [ref=f7e164]
+              - cell "0.000" [ref=f7e165]
+            - row [ref=f7e166]:
+              - cell "3" [ref=f7e167]
+              - cell "인천 웨이브스" [ref=f7e168]
+              - cell "0" [ref=f7e169]
+              - cell "0" [ref=f7e170]
+              - cell "0.000" [ref=f7e171]
+            - row [ref=f7e172]:
+              - cell "4" [ref=f7e173]
+              - cell "대전 스파크스" [ref=f7e174]
+              - cell "0" [ref=f7e175]
+              - cell "0" [ref=f7e176]
+              - cell "0.000" [ref=f7e177]
+      - generic [ref=f7e178]:
+        - heading "타격 리더" [level=2] [ref=f7e179]
+        - paragraph [ref=f7e180]: 아직 타격 리더가 없습니다.
+      - generic [ref=f7e181]:
+        - heading "투수 리더" [level=2] [ref=f7e182]
+        - paragraph [ref=f7e183]: 아직 투수 리더가 없습니다.
+      - generic [ref=f7e184]:
+        - heading "최근 이벤트" [level=2] [ref=f7e185]
+        - generic [ref=f7e186]:
+          - generic [ref=f7e187]: 2027. 4. 3. · 선수 생성 · FA 선수 5
+          - generic [ref=f7e188]: 2027. 4. 3. · 선수 생성 · FA 선수 4
+          - generic [ref=f7e189]: 2027. 4. 3. · 선수 생성 · FA 선수 3
+          - generic [ref=f7e190]: 2027. 4. 3. · 선수 생성 · FA 선수 2
+          - generic [ref=f7e191]: 2027. 4. 3. · 선수 생성 · FA 선수 1
+          - generic [ref=f7e192]: 2027. 4. 3. · 선수 생성 · 유망주 18
+          - generic [ref=f7e193]: 2027. 4. 3. · 선수 생성 · 유망주 17
+          - generic [ref=f7e194]: 2027. 4. 3. · 선수 생성 · 유망주 16
+      - generic [ref=f7e195]:
+        - heading "최근 계약" [level=2] [ref=f7e196]
+        - generic [ref=f7e197]:
+          - generic [ref=f7e198]: 2027. 4. 3. · 선수 계약 · 서민준
+          - generic [ref=f7e199]: 2027. 4. 3. · 계약 등록 · 서민준
+          - generic [ref=f7e200]: 2027. 4. 3. · 선수 계약 · 한지완
+          - generic [ref=f7e201]: 2027. 4. 3. · 계약 등록 · 한지완
+          - generic [ref=f7e202]: 2027. 4. 3. · 선수 계약 · 손예준
+      - generic [ref=f7e203]:
+        - heading "최근 트레이드" [level=2] [ref=f7e204]
+        - paragraph [ref=f7e205]: 최근 트레이드가 없습니다.
+      - generic [ref=f7e206]:
+        - heading "콜업 / 말소" [level=2] [ref=f7e207]
+        - paragraph [ref=f7e208]: 로스터 이동이 없습니다.
+      - generic [ref=f7e209]:
+        - heading "유망주 상위 10명" [level=2] [ref=f7e210]
+        - generic [ref=f7e211]:
+          - button "1. 유망주 12 지명 추천" [ref=f7e212] [cursor=pointer]:
+            - generic [ref=f7e213]: 1. 유망주 12
+            - strong [ref=f7e214]: 지명 추천
+          - button "2. 유망주 7 지명 추천" [ref=f7e215] [cursor=pointer]:
+            - generic [ref=f7e216]: 2. 유망주 7
+            - strong [ref=f7e217]: 지명 추천
+          - button "3. 유망주 14 지명 추천" [ref=f7e218] [cursor=pointer]:
+            - generic [ref=f7e219]: 3. 유망주 14
+            - strong [ref=f7e220]: 지명 추천
+          - button "4. 유망주 17 지명 추천" [ref=f7e221] [cursor=pointer]:
+            - generic [ref=f7e222]: 4. 유망주 17
+            - strong [ref=f7e223]: 지명 추천
+          - button "5. 유망주 13 지명 추천" [ref=f7e224] [cursor=pointer]:
+            - generic [ref=f7e225]: 5. 유망주 13
+            - strong [ref=f7e226]: 지명 추천
+          - button "6. 유망주 5 계속 관찰" [ref=f7e227] [cursor=pointer]:
+            - generic [ref=f7e228]: 6. 유망주 5
+            - strong [ref=f7e229]: 계속 관찰
+          - button "7. 유망주 4 지명 추천" [ref=f7e230] [cursor=pointer]:
+            - generic [ref=f7e231]: 7. 유망주 4
+            - strong [ref=f7e232]: 지명 추천
+          - button "8. 유망주 8 계속 관찰" [ref=f7e233] [cursor=pointer]:
+            - generic [ref=f7e234]: 8. 유망주 8
+            - strong [ref=f7e235]: 계속 관찰
+          - button "9. 유망주 10 지명 추천" [ref=f7e236] [cursor=pointer]:
+            - generic [ref=f7e237]: 9. 유망주 10
+            - strong [ref=f7e238]: 지명 추천
+          - button "10. 유망주 15 지명 추천" [ref=f7e239] [cursor=pointer]:
+            - generic [ref=f7e240]: 10. 유망주 15
+            - strong [ref=f7e241]: 지명 추천
+      - generic [ref=f7e242]:
+        - heading "내 구단" [level=2] [ref=f7e243]
+        - generic [ref=f7e244]:
+          - generic [ref=f7e245]: 감독
+          - strong [ref=f7e246]: 서울 감독
+        - generic [ref=f7e247]:
+          - generic [ref=f7e248]: 팀
+          - strong [ref=f7e249]: 서울 팰컨스
+        - generic [ref=f7e250]:
+          - generic [ref=f7e251]: 1군 등록 선수
+          - strong [ref=f7e252]: "15"

@@ -1,0 +1,171 @@
+오후 11:07:04 [vite] (client) [Unhandled error] Error: World invariant violation: Player prospect_3 age NaN does not match birth date 20010-09-12
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.evaluateDraftEligibility src/engine/world.ts:639:9
+ > seedProspects src/web/seedWorld.ts:258:30
+ > createSeedWorld src/web/seedWorld.ts:171:2
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+
+오후 11:07:04 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:09:19 [vite] (client) [Unhandled error] Error: World invariant violation: Player prospect_3 age NaN does not match birth date 20010-09-12
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.evaluateDraftEligibility src/engine/world.ts:639:9
+ > seedProspects src/web/seedWorld.ts:258:30
+ > createSeedWorld src/web/seedWorld.ts:171:2
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+
+오후 11:09:19 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:09:38 [vite] (client) [Unhandled error] Error: World invariant violation: Player prospect_3 age NaN does not match birth date 20010-09-12
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.evaluateDraftEligibility src/engine/world.ts:639:9
+ > seedProspects src/web/seedWorld.ts:258:30
+ > createSeedWorld src/web/seedWorld.ts:171:2
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+
+오후 11:09:38 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:09:38 [vite] (client) [Unhandled error] Error: World invariant violation: Player prospect_3 age NaN does not match birth date 20010-09-12
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.evaluateDraftEligibility src/engine/world.ts:639:9
+ > seedProspects src/web/seedWorld.ts:258:30
+ > createSeedWorld src/web/seedWorld.ts:171:2
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+
+오후 11:09:38 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:12:47 [vite] (client) [Unhandled error] Error: World invariant violation: Player prospect_3 age NaN does not match birth date 20010-09-12
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.evaluateDraftEligibility src/engine/world.ts:639:9
+ > seedProspects src/web/seedWorld.ts:258:30
+ > createSeedWorld src/web/seedWorld.ts:171:2
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+
+오후 11:12:47 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:13:02 [vite] (client) [Unhandled error] Error: World invariant violation: Player free_agent_5 age NaN does not match birth date 19910-01-14
+ > LeagueWorld.assertInvariants src/engine/world.ts:2294:12
+    2292 |      const issues = this.validateInvariants();
+    2293 |      if (issues.length > 0) {
+    2294 |        throw new Error(`World invariant violation: ${issues.join("; ")}`);
+         |              ^
+    2295 |      }
+    2296 |    }
+ > LeagueWorld.createDraft src/engine/world.ts:722:9
+ > createSeedWorld src/web/seedWorld.ts:183:22
+ > src/web/App.tsx:50:62
+ > mountStateImpl node_modules/react-dom/cjs/react-dom-client.development.js:8268:23
+ > mountState node_modules/react-dom/cjs/react-dom-client.development.js:8289:21
+ > Object.useState node_modules/react-dom/cjs/react-dom-client.development.js:26243:17
+ > exports.useState node_modules/react/cjs/react.development.js:1263:33
+ > App src/web/App.tsx:50:30
+ > Object.react_stack_bottom_frame node_modules/react-dom/cjs/react-dom-client.development.js:25904:19
+
+오후 11:13:02 [vite] (client) [console.warn] An error occurred in the <App> component.
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries.
+
+오후 11:13:09 [vite] (client) [console.error] Error: World invariant violation: Player free_agent_5 age NaN does not match birth date 19910-01-14
+    at LeagueWorld.assertInvariants (http://127.0.0.1:5173/src/engine/world.ts:1928:10)
+    at LeagueWorld.createDraft (http://127.0.0.1:5173/src/engine/world.ts:445:8)
+    at createSeedWorld (http://127.0.0.1:5173/src/web/seedWorld.ts?t=1787148782026:206:22)
+    at http://127.0.0.1:5173/src/web/App.tsx?t=1787148782026:30:45
+    at mountStateImpl (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4588:20)
+    at mountState (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4609:19)
+    at Object.useState (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:13049:13)
+    at exports.useState (http://127.0.0.1:5173/node_modules/.vite/deps/react.js?v=6b3e6761:748:31)
+    at App (http://127.0.0.1:5173/src/web/App.tsx?t=1787148782026:30:30)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+
+The above error occurred in the <App> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:13:20 [vite] (client) [console.error] Error: World invariant violation: Player free_agent_5 age NaN does not match birth date 19910-01-14
+    at LeagueWorld.assertInvariants (http://127.0.0.1:5173/src/engine/world.ts:1928:10)
+    at LeagueWorld.createDraft (http://127.0.0.1:5173/src/engine/world.ts:445:8)
+    at createSeedWorld (http://127.0.0.1:5173/src/web/seedWorld.ts?t=1787148782026:206:22)
+    at http://127.0.0.1:5173/src/web/App.tsx?t=1787148782026:30:45
+    at mountStateImpl (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4588:20)
+    at mountState (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:4609:19)
+    at Object.useState (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:13049:13)
+    at exports.useState (http://127.0.0.1:5173/node_modules/.vite/deps/react.js?v=6b3e6761:748:31)
+    at App (http://127.0.0.1:5173/src/web/App.tsx?t=1787148782026:30:30)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=18a41433:12866:12)
+
+The above error occurred in the <App> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+오후 11:16:42 [vite] (client) [console.error] You are calling ReactDOMClient.createRoot() on a container that has already been passed to createRoot() before. Instead, call root.render() on the existing root instead if you want to update it.
