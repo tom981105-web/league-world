@@ -240,6 +240,50 @@ export interface AdvanceWorldOptions {
   injuryChance?: (player: Readonly<Player>, world: LeagueWorld) => number;
 }
 
+interface GameBalanceConfig {
+  conditionInfluence: number;
+  strikeoutBase: number;
+  strikeoutAbilityInfluence: number;
+  walkBase: number;
+  walkAbilityInfluence: number;
+  singleBase: number;
+  singleContactInfluence: number;
+  doubleBase: number;
+  doublePowerInfluence: number;
+  tripleBase: number;
+  tripleSpeedInfluence: number;
+  homeRunBase: number;
+  homeRunPowerInfluence: number;
+  groundOutBase: number;
+  flyOutBase: number;
+  lineOutBase: number;
+  starterBaseBattersFaced: number;
+  starterStaminaBattersFacedInfluence: number;
+  starterFatigueBattersFacedPenalty: number;
+}
+
+const GAME_BALANCE: GameBalanceConfig = {
+  conditionInfluence: 8,
+  strikeoutBase: 17.5,
+  strikeoutAbilityInfluence: 0.1,
+  walkBase: 7.5,
+  walkAbilityInfluence: 0.06,
+  singleBase: 12.2,
+  singleContactInfluence: 0.065,
+  doubleBase: 4.2,
+  doublePowerInfluence: 0.04,
+  tripleBase: 0.45,
+  tripleSpeedInfluence: 0.006,
+  homeRunBase: 2.05,
+  homeRunPowerInfluence: 0.035,
+  groundOutBase: 20,
+  flyOutBase: 17.5,
+  lineOutBase: 9,
+  starterBaseBattersFaced: 20,
+  starterStaminaBattersFacedInfluence: 0.12,
+  starterFatigueBattersFacedPenalty: 0.04,
+};
+
 export type PlayableGameControl = "USER_GAME" | "AI_GAME";
 
 export interface CurrentDateGame {
@@ -1531,21 +1575,54 @@ export class LeagueWorld {
     const pitcher = this.requirePlayer(pitcherId);
     const batterCondition = (batter.gameCondition.readiness - batter.gameCondition.fatigue * 0.45) / 100;
     const pitcherCondition = (pitcher.gameCondition.readiness - pitcher.gameCondition.fatigue * 0.45) / 100;
-    const contactAdvantage = batter.battingRatings.contact + batterCondition * 12 - pitcher.pitchingRatings.velocity * 0.2 - pitcher.pitchingRatings.movement * 0.45 - pitcherCondition * 8;
-    const disciplineAdvantage = batter.battingRatings.plateDiscipline + batterCondition * 10 - pitcher.pitchingRatings.control * 0.65 - pitcherCondition * 8;
-    const powerAdvantage = batter.battingRatings.power + batterCondition * 8 - pitcher.pitchingRatings.pitchQuality * 0.45 - pitcherCondition * 7;
-    const speedBump = batter.battingRatings.speed * 0.03;
+    const conditionEdge = (batterCondition - pitcherCondition) * GAME_BALANCE.conditionInfluence;
+    const contactEdge =
+      batter.battingRatings.contact -
+      pitcher.pitchingRatings.movement * 0.65 -
+      pitcher.pitchingRatings.pitchQuality * 0.2 +
+      conditionEdge;
+    const disciplineEdge =
+      batter.battingRatings.plateDiscipline -
+      pitcher.pitchingRatings.control +
+      conditionEdge;
+    const powerEdge =
+      batter.battingRatings.power -
+      pitcher.pitchingRatings.movement * 0.35 -
+      pitcher.pitchingRatings.pitchQuality * 0.55 +
+      conditionEdge;
+    const strikeoutEdge =
+      pitcher.pitchingRatings.velocity * 0.45 +
+      pitcher.pitchingRatings.pitchQuality * 0.45 -
+      batter.battingRatings.contact * 0.55 -
+      batter.battingRatings.plateDiscipline * 0.2 -
+      conditionEdge;
 
     const weights: Record<PlateAppearanceResult, number> = {
-      STRIKEOUT: this.clampWeight(18 + pitcher.pitchingRatings.velocity * 0.08 + pitcher.pitchingRatings.pitchQuality * 0.08 - batter.battingRatings.contact * 0.12 - batterCondition * 5),
-      WALK: this.clampWeight(7 + disciplineAdvantage * 0.11),
-      SINGLE: this.clampWeight(13 + contactAdvantage * 0.12 + speedBump),
-      DOUBLE: this.clampWeight(5 + powerAdvantage * 0.06 + contactAdvantage * 0.03),
-      TRIPLE: this.clampWeight(1 + speedBump + contactAdvantage * 0.01),
-      HOME_RUN: this.clampWeight(3 + powerAdvantage * 0.08),
-      GROUND_OUT: this.clampWeight(18 - contactAdvantage * 0.04),
-      FLY_OUT: this.clampWeight(16 - powerAdvantage * 0.03),
-      LINE_OUT: this.clampWeight(8 + contactAdvantage * 0.02),
+      STRIKEOUT: this.clampWeight(GAME_BALANCE.strikeoutBase + strikeoutEdge * GAME_BALANCE.strikeoutAbilityInfluence),
+      WALK: this.clampWeight(GAME_BALANCE.walkBase + disciplineEdge * GAME_BALANCE.walkAbilityInfluence),
+      SINGLE: this.clampWeight(
+        GAME_BALANCE.singleBase +
+        contactEdge * GAME_BALANCE.singleContactInfluence +
+        batter.battingRatings.speed * 0.008,
+      ),
+      DOUBLE: this.clampWeight(
+        GAME_BALANCE.doubleBase +
+        powerEdge * GAME_BALANCE.doublePowerInfluence +
+        contactEdge * 0.012,
+      ),
+      TRIPLE: this.clampWeight(
+        GAME_BALANCE.tripleBase +
+        batter.battingRatings.speed * GAME_BALANCE.tripleSpeedInfluence +
+        contactEdge * 0.004,
+      ),
+      HOME_RUN: this.clampWeight(
+        GAME_BALANCE.homeRunBase +
+        powerEdge * GAME_BALANCE.homeRunPowerInfluence +
+        batter.battingRatings.power * 0.005,
+      ),
+      GROUND_OUT: this.clampWeight(GAME_BALANCE.groundOutBase - contactEdge * 0.02),
+      FLY_OUT: this.clampWeight(GAME_BALANCE.flyOutBase - powerEdge * 0.015),
+      LINE_OUT: this.clampWeight(GAME_BALANCE.lineOutBase + contactEdge * 0.005),
     };
     return this.weightedPlateAppearance(weights);
   }
@@ -1822,9 +1899,10 @@ export class LeagueWorld {
     const threshold = this.bullpenFatigueThresholdForGame(gameId);
     const strategy = liveGame.strategies[teamId] ?? this.defaultManagerGameStrategy();
     const pitcherLine = liveGame.boxScore.pitchers[liveGame.currentPitcherId];
+    const battersFacedLimit = this.startingPitcherBattersFacedLimit(currentPitcher);
     const shouldConsider =
       currentPitcher.gameCondition.fatigue >= threshold - strategy.bullpenAggression * 0.2 ||
-      (pitcherLine?.battersFaced ?? 0) >= 18;
+      (pitcherLine?.battersFaced ?? 0) >= battersFacedLimit;
     if (!shouldConsider) return undefined;
     const candidate = this.chooseBullpenReplacement(liveGame, teamId);
     if (!candidate) return undefined;
@@ -3879,6 +3957,14 @@ export class LeagueWorld {
   private bullpenFatigueThresholdForGame(gameId: EntityId): number {
     const game = this.requireGame(gameId);
     return this.requireLeague(this.requireSeason(game.seasonId).leagueId).bullpenFatigueThreshold ?? 55;
+  }
+
+  private startingPitcherBattersFacedLimit(pitcher: Player): number {
+    const limit =
+      GAME_BALANCE.starterBaseBattersFaced +
+      pitcher.pitchingRatings.stamina * GAME_BALANCE.starterStaminaBattersFacedInfluence -
+      pitcher.gameCondition.fatigue * GAME_BALANCE.starterFatigueBattersFacedPenalty;
+    return Math.max(18, Math.min(32, Math.round(limit)));
   }
 
   private closerLeadMaxRunsForGame(gameId: EntityId): number {
