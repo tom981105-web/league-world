@@ -54,6 +54,7 @@ import type {
   GameFixture,
   LeagueWorld,
   Player,
+  CanAdvanceDateResult,
   Team,
   WorldEvent,
 } from "../index.js";
@@ -234,9 +235,22 @@ export function App() {
     }
   };
 
-  const advance = (days: number) => mutate(`${days}일 진행했습니다.`, () => {
-    world.advanceDays(days, { playerCareerOptions: () => [], managerCareerOptions: () => [] });
-  });
+  const advance = (days: number) => {
+    try {
+      const result = world.advancePlayableDays(days, {
+        userManagerId: bundle.userManagerId,
+        playerCareerOptions: () => [],
+        managerCareerOptions: () => [],
+      });
+      setVersion((value) => value + 1);
+      setMessage(result.message);
+      if (result.daysAdvanced > 0 || result.results.some((item) => item.completedAiGameIds.length > 0 || item.completedUserGameIds.length > 0)) {
+        autoSave();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -412,6 +426,15 @@ function HomePage({
           <button onClick={() => setPage("MANAGER")}><Handshake size={16} />감독직 알아보기</button>
         </div>
         <section className="dashboard-grid">
+          <Panel title="오늘 리그 경기">
+            <CompactList empty="오늘 예정된 경기가 없습니다.">
+              {data.todayGames.map((game) => <span key={game.id}>{teamName(world, game.awayTeamId)} @ {teamName(world, game.homeTeamId)} · {labelStatus(game.status)}</span>)}
+            </CompactList>
+          </Panel>
+          <Panel title="날짜 진행 상태">
+            <Metric label="진행 가능" value={data.progressStatus.canAdvance ? "가능" : "대기"} />
+            <p className="muted">{data.progressStatus.message}</p>
+          </Panel>
           <Panel title="채용 공고">
             <CompactList empty="현재 공개된 감독직이 없습니다.">
               {world.getManagerJobVacancies().map((job) => <span key={job.id}>{orgName(world, job.organizationId)} · {job.expectations}</span>)}
@@ -448,6 +471,26 @@ function HomePage({
         </div>
       </div>
       <section className="dashboard-grid">
+        <Panel title="오늘 사용자 경기">
+          <CompactList empty="오늘 직접 진행할 경기가 없습니다.">
+            {data.todayUserGames.map((game) => (
+              <button className="feature-row" key={game.id} onClick={() => { setSelectedGameId(game.id); setPage("GAMES"); }}>
+                <span>{formatDateKo(game.scheduledDate)} · {labelStatus(game.status)}</span>
+                <strong>{teamName(world, game.awayTeamId)} @ {teamName(world, game.homeTeamId)}</strong>
+                <em>{data.progressStatus.canAdvance ? "진행 완료" : "직접 진행 필요"}</em>
+              </button>
+            ))}
+          </CompactList>
+        </Panel>
+        <Panel title="오늘 다른 경기">
+          <CompactList empty="오늘 다른 경기가 없습니다.">
+            {data.todayAiGames.map((game) => <span key={game.id}>{teamName(world, game.awayTeamId)} @ {teamName(world, game.homeTeamId)} · {labelStatus(game.status)}</span>)}
+          </CompactList>
+        </Panel>
+        <Panel title="날짜 진행 가능 여부">
+          <Metric label="상태" value={data.progressStatus.canAdvance ? "진행 가능" : "사용자 경기 대기"} />
+          <p className="muted">{data.progressStatus.message}</p>
+        </Panel>
         <Panel title="다음 경기">
           {nextGame ? (
             <button className="feature-row" onClick={() => { setSelectedGameId(nextGame.id); setPage("GAMES"); }}>
@@ -696,7 +739,10 @@ function GamesPage({
               <button onClick={() => mutate("Game started.", () => world.startGame(selectedGame.id))}><Play size={16} />경기 시작</button>
               <button onClick={() => mutate("Simulated next PA.", () => world.simulateNextPlateAppearance(selectedGame.id))}><Activity size={16} />다음 타석</button>
               <button onClick={() => mutate("Simulated half inning.", () => world.simulateHalfInning(selectedGame.id))}><Activity size={16} />반 이닝 진행</button>
-              <button onClick={() => mutate("Simulated full game.", () => world.simulateGame(selectedGame.id))}><Activity size={16} />경기 시뮬레이션</button>
+              <button onClick={() => mutate("Simulated full game.", () => {
+                autoLineups(world, selectedGame);
+                world.simulateGame(selectedGame.id);
+              })}><Activity size={16} />경기 시뮬레이션</button>
             </div>
             {live && (
               <div className="button-row">
@@ -1310,6 +1356,9 @@ interface ViewModel {
   myFuturesPlayers: Player[];
   games: GameFixture[];
   todayGames: GameFixture[];
+  todayUserGames: GameFixture[];
+  todayAiGames: GameFixture[];
+  progressStatus: CanAdvanceDateResult;
   standings: ReturnType<LeagueWorld["getStandings"]>;
   battingLeaders: ReturnType<LeagueWorld["getBattingLeaders"]>;
   pitchingLeaders: ReturnType<LeagueWorld["getPitchingLeaders"]>;
@@ -1326,6 +1375,9 @@ function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
   const myFuturesTeam = [...world.teams.values()].find((team) => team.organizationId === userTeam?.organizationId && !team.isTopLevel);
   const players = [...world.players.values()].sort((a, b) => a.name.localeCompare(b.name));
   const standings = season ? world.getStandings(season.id) : [];
+  const todayGames = [...world.games.values()].filter((game) => game.scheduledDate === world.clock.now());
+  const todayUserGames = userTeam ? todayGames.filter((game) => game.homeTeamId === userTeam.id || game.awayTeamId === userTeam.id) : [];
+  const todayAiGames = todayGames.filter((game) => !userTeam || (game.homeTeamId !== userTeam.id && game.awayTeamId !== userTeam.id));
   return {
     season,
     userManager,
@@ -1337,7 +1389,10 @@ function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
     myTopPlayers: players.filter((player) => player.currentTeamId === userTeam?.id),
     myFuturesPlayers: players.filter((player) => player.currentTeamId === myFuturesTeam?.id),
     games: [...world.games.values()].sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate)),
-    todayGames: [...world.games.values()].filter((game) => game.scheduledDate === world.clock.now()),
+    todayGames,
+    todayUserGames,
+    todayAiGames,
+    progressStatus: world.canAdvanceDate({ userManagerId: bundle.userManagerId, ...(season ? { seasonId: season.id } : {}) }),
     standings,
     battingLeaders: season ? world.getBattingLeaders(season.id, "OPS", { limit: 5 }) : [],
     pitchingLeaders: season ? world.getPitchingLeaders(season.id, "ERA", { limit: 5 }) : [],

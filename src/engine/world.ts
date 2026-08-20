@@ -240,6 +240,56 @@ export interface AdvanceWorldOptions {
   injuryChance?: (player: Readonly<Player>, world: LeagueWorld) => number;
 }
 
+export type PlayableGameControl = "USER_GAME" | "AI_GAME";
+
+export interface CurrentDateGame {
+  gameId: EntityId;
+  date: ISODate;
+  homeTeamId: EntityId;
+  awayTeamId: EntityId;
+  status: GameStatus;
+  control: PlayableGameControl;
+}
+
+export interface PlayableDayOptions extends AdvanceWorldOptions {
+  userManagerId?: EntityId;
+  autoPlayUserGames?: boolean;
+  leagueId?: EntityId;
+  seasonId?: EntityId;
+}
+
+export interface CanAdvanceDateResult {
+  date: ISODate;
+  canAdvance: boolean;
+  userTeamId?: EntityId;
+  blockingGameIds: EntityId[];
+  pendingGameIds: EntityId[];
+  message: string;
+}
+
+export interface ProcessCurrentDayResult {
+  date: ISODate;
+  nextDate?: ISODate;
+  userTeamId?: EntityId;
+  userGameIds: EntityId[];
+  aiGameIds: EntityId[];
+  completedAiGameIds: EntityId[];
+  completedUserGameIds: EntityId[];
+  skippedGameIds: EntityId[];
+  blocked: boolean;
+  message: string;
+}
+
+export interface AdvancePlayableDaysResult {
+  startDate: ISODate;
+  endDate: ISODate;
+  requestedDays: number;
+  daysAdvanced: number;
+  stoppedForUserGame: boolean;
+  results: ProcessCurrentDayResult[];
+  message: string;
+}
+
 export class LeagueWorld {
   readonly countries = new Map<EntityId, Country>();
   readonly leagues = new Map<EntityId, League>();
@@ -1338,12 +1388,17 @@ export class LeagueWorld {
     );
     const requiredPositions = this.requiredLineupPositions(rules);
     const selected = new Set<EntityId>();
+    const pitcherId =
+      startingPitcherId ??
+      this.bestLineupCandidate(candidates, new Set<EntityId>(), "P")?.id;
+    if (!pitcherId) throw new Error("No available starting pitcher candidate");
+    if (rules.usesDH) selected.add(pitcherId);
     const lineup: StartingLineupSlot[] = [];
 
     for (const position of requiredPositions) {
       const forcedPitcher =
-        position === "P" && startingPitcherId
-          ? candidates.find((player) => player.id === startingPitcherId && !selected.has(player.id))
+        position === "P"
+          ? candidates.find((player) => player.id === pitcherId && !selected.has(player.id))
           : undefined;
       const player =
         forcedPitcher ??
@@ -1355,11 +1410,6 @@ export class LeagueWorld {
       lineup.push(this.makeLineupSlot(lineup.length + 1, player.id, position));
     }
 
-    const pitcherId =
-      startingPitcherId ??
-      this.bestLineupCandidate(candidates, new Set<EntityId>(), "P")?.id;
-    if (!pitcherId) throw new Error("No available starting pitcher candidate");
-
     const activePlayerIds = this.rankGameCandidates(candidates, "DH")
       .map((player) => player.id)
       .slice(0, rules.maxActivePlayers);
@@ -1370,7 +1420,7 @@ export class LeagueWorld {
     const benchPlayerIds = cappedActivePlayerIds.filter((playerId) => !selected.has(playerId) && playerId !== pitcherId);
     const bullpenPlayerIds = cappedActivePlayerIds.filter((playerId) => {
       const player = this.requirePlayer(playerId);
-      return playerId !== pitcherId && this.positionFit(player, "P") >= 60;
+      return playerId !== pitcherId && !selected.has(playerId) && this.positionFit(player, "P") >= 60;
     });
 
     return this.createGameRoster({
@@ -1457,8 +1507,8 @@ export class LeagueWorld {
       actionHistory: [],
       removedPlayerIds: [],
       currentDefense: {
-        [game.homeTeamId]: this.sortedLineup(homeRoster),
-        [game.awayTeamId]: this.sortedLineup(awayRoster),
+        [game.homeTeamId]: structuredClone(this.sortedLineup(homeRoster)),
+        [game.awayTeamId]: structuredClone(this.sortedLineup(awayRoster)),
       },
       strategies: {
         [game.homeTeamId]: this.defaultManagerGameStrategy(),
@@ -2595,6 +2645,158 @@ export class LeagueWorld {
     return this.clock.now();
   }
 
+  getUserControlledTeamId(userManagerId?: EntityId): EntityId | undefined {
+    if (!userManagerId) return undefined;
+    const manager = this.managers.get(userManagerId);
+    if (!manager || manager.status !== "EMPLOYED") return undefined;
+    return manager.currentTeamId;
+  }
+
+  getGamesForDate(
+    date: ISODate = this.clock.now(),
+    filters: { leagueId?: EntityId; seasonId?: EntityId } = {},
+  ): GameFixture[] {
+    if (filters.leagueId) this.requireLeague(filters.leagueId);
+    if (filters.seasonId) this.requireSeason(filters.seasonId);
+    return [...this.games.values()]
+      .filter((game) => game.scheduledDate === date)
+      .filter((game) => !filters.seasonId || game.seasonId === filters.seasonId)
+      .filter((game) => !filters.leagueId || this.requireSeason(game.seasonId).leagueId === filters.leagueId)
+      .map((game) => structuredClone(game))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  getPendingGamesForCurrentDate(options: Pick<PlayableDayOptions, "userManagerId" | "leagueId" | "seasonId"> = {}): CurrentDateGame[] {
+    const userTeamId = this.getUserControlledTeamId(options.userManagerId);
+    return this.getGamesForDate(this.clock.now(), options)
+      .filter((game) => game.status !== "COMPLETED")
+      .map((game) => ({
+        gameId: game.id,
+        date: game.scheduledDate,
+        homeTeamId: game.homeTeamId,
+        awayTeamId: game.awayTeamId,
+        status: game.status,
+        control: userTeamId && this.gameIncludesTeam(game, userTeamId) ? "USER_GAME" : "AI_GAME",
+      }));
+  }
+
+  canAdvanceDate(options: Pick<PlayableDayOptions, "userManagerId" | "leagueId" | "seasonId"> = {}): CanAdvanceDateResult {
+    const date = this.clock.now();
+    const userTeamId = this.getUserControlledTeamId(options.userManagerId);
+    const currentGames = this.getGamesForDate(date, options);
+    const actionable = currentGames.filter((game) => this.isActionableGameForDailyProgress(game));
+    const blockingGames = userTeamId
+      ? actionable.filter((game) => this.gameIncludesTeam(game, userTeamId) && game.status !== "COMPLETED")
+      : [];
+    const pendingGames = actionable.filter((game) => game.status !== "COMPLETED");
+    const canAdvance = blockingGames.length === 0 && pendingGames.length === 0;
+    return {
+      date,
+      canAdvance,
+      ...(userTeamId ? { userTeamId } : {}),
+      blockingGameIds: blockingGames.map((game) => game.id),
+      pendingGameIds: pendingGames.map((game) => game.id),
+      message: canAdvance
+        ? "날짜 진행 가능"
+        : blockingGames.length > 0
+          ? "오늘 경기가 아직 종료되지 않았습니다. 경기를 진행하거나 자동 진행한 뒤 다음 날짜로 이동할 수 있습니다."
+          : "오늘 리그 경기가 아직 모두 종료되지 않았습니다.",
+    };
+  }
+
+  processCurrentDay(options: PlayableDayOptions = {}): ProcessCurrentDayResult {
+    const date = this.clock.now();
+    const userTeamId = this.getUserControlledTeamId(options.userManagerId);
+    const currentGames = this.getGamesForDate(date, options);
+    const actionable = currentGames.filter((game) => this.isActionableGameForDailyProgress(game));
+    const skippedGameIds = currentGames
+      .filter((game) => !this.isActionableGameForDailyProgress(game))
+      .map((game) => game.id);
+    const userGames = userTeamId ? actionable.filter((game) => this.gameIncludesTeam(game, userTeamId)) : [];
+    const aiGames = actionable.filter((game) => !userTeamId || !this.gameIncludesTeam(game, userTeamId));
+    const completedAiGameIds: EntityId[] = [];
+    const completedUserGameIds: EntityId[] = [];
+
+    for (const game of aiGames) {
+      if (this.isGameCompletedForDailyProgress(game)) continue;
+      this.simulateDailyGame(game.id, "AI_GAME", date);
+      completedAiGameIds.push(game.id);
+    }
+
+    for (const game of userGames) {
+      if (this.isGameCompletedForDailyProgress(game)) continue;
+      if (options.autoPlayUserGames) {
+        this.simulateDailyGame(game.id, "USER_GAME", date);
+        completedUserGameIds.push(game.id);
+      } else if (game.status === "SCHEDULED") {
+        this.prepareGameForDailyProgress(game.id, date);
+      }
+    }
+
+    const check = this.canAdvanceDate(options);
+    if (!check.canAdvance) {
+      return {
+        date,
+        ...(userTeamId ? { userTeamId } : {}),
+        userGameIds: userGames.map((game) => game.id),
+        aiGameIds: aiGames.map((game) => game.id),
+        completedAiGameIds,
+        completedUserGameIds,
+        skippedGameIds,
+        blocked: true,
+        message: check.message,
+      };
+    }
+
+    const nextDate = this.advanceDay(options);
+    return {
+      date,
+      nextDate,
+      ...(userTeamId ? { userTeamId } : {}),
+      userGameIds: userGames.map((game) => game.id),
+      aiGameIds: aiGames.map((game) => game.id),
+      completedAiGameIds,
+      completedUserGameIds,
+      skippedGameIds,
+      blocked: false,
+      message: `${date} 일정을 처리하고 ${nextDate}로 진행했습니다.`,
+    };
+  }
+
+  advancePlayableDays(days: number, options: PlayableDayOptions = {}): AdvancePlayableDaysResult {
+    if (!Number.isInteger(days) || days < 0) {
+      throw new Error("days must be a non-negative integer");
+    }
+    const startDate = this.clock.now();
+    const results: ProcessCurrentDayResult[] = [];
+    for (let elapsed = 0; elapsed < days; elapsed += 1) {
+      const result = this.processCurrentDay(options);
+      results.push(result);
+      if (result.blocked) {
+        return {
+          startDate,
+          endDate: this.clock.now(),
+          requestedDays: days,
+          daysAdvanced: elapsed,
+          stoppedForUserGame: result.userGameIds.length > 0,
+          results,
+          message: result.userGameIds.length > 0
+            ? `${this.clock.now()}에 직접 진행해야 할 경기가 있어 날짜 진행을 중단했습니다.`
+            : result.message,
+        };
+      }
+    }
+    return {
+      startDate,
+      endDate: this.clock.now(),
+      requestedDays: days,
+      daysAdvanced: days,
+      stoppedForUserGame: false,
+      results,
+      message: `${days}일 진행했습니다.`,
+    };
+  }
+
   applyPlayerCareerOption(playerId: EntityId, option: CareerOption): void {
     const player = this.requirePlayer(playerId);
     if (player.status === "RETIRED") return;
@@ -3547,7 +3749,7 @@ export class LeagueWorld {
   }
 
   private syncCurrentDefenseFromRoster(liveGame: LiveGame, teamId: EntityId): void {
-    liveGame.currentDefense[teamId] = this.sortedLineup(this.requireGameRoster(liveGame.gameId, teamId));
+    liveGame.currentDefense[teamId] = structuredClone(this.sortedLineup(this.requireGameRoster(liveGame.gameId, teamId)));
   }
 
   private findRunnerBase(liveGame: LiveGame, playerId: EntityId): keyof BaseState | undefined {
@@ -4584,6 +4786,73 @@ export class LeagueWorld {
 
   private sortedLineup(roster: GameDayRoster): StartingLineupSlot[] {
     return [...roster.startingLineup].sort((a, b) => a.battingOrder - b.battingOrder);
+  }
+
+  private isActionableGameForDailyProgress(game: GameFixture): boolean {
+    return game.status === "SCHEDULED";
+  }
+
+  private isGameCompletedForDailyProgress(game: GameFixture): boolean {
+    return game.status === "COMPLETED" || game.status === "POSTPONED" || game.status === "CANCELLED";
+  }
+
+  private gameIncludesTeam(game: GameFixture, teamId: EntityId): boolean {
+    return game.homeTeamId === teamId || game.awayTeamId === teamId;
+  }
+
+  private simulateDailyGame(gameId: EntityId, control: PlayableGameControl, date: ISODate): void {
+    const game = this.requireGame(gameId);
+    if (this.isGameCompletedForDailyProgress(game)) return;
+    try {
+      this.prepareGameForDailyProgress(gameId, date);
+      this.simulateGame(gameId);
+    } catch (error) {
+      throw this.dailyProgressError(error, date, game, control);
+    }
+  }
+
+  private prepareGameForDailyProgress(gameId: EntityId, date: ISODate): void {
+    const game = this.requireGame(gameId);
+    if (game.scheduledDate !== date) {
+      throw new Error(`Game ${game.id} is scheduled for ${game.scheduledDate}, not ${date}`);
+    }
+    for (const teamId of [game.homeTeamId, game.awayTeamId]) {
+      if (!this.findGameRoster(game.id, teamId)) {
+        const startingPitcherId = this.selectDailyStartingPitcher(teamId);
+        this.autoGenerateLineup({
+          gameId: game.id,
+          teamId,
+          ...(startingPitcherId ? { startingPitcherId } : {}),
+        });
+      }
+    }
+    const issues = this.validateGameReady(game.id);
+    if (issues.length > 0) {
+      throw new Error(`Game is not ready: ${issues.join("; ")}`);
+    }
+  }
+
+  private selectDailyStartingPitcher(teamId: EntityId): EntityId | undefined {
+    const rotation = this.pitchingRotations.get(teamId);
+    if (rotation) {
+      for (let attempt = 0; attempt < rotation.orderedStartingPitcherIds.length; attempt += 1) {
+        const playerId = rotation.orderedStartingPitcherIds[rotation.nextStarterIndex]!;
+        rotation.nextStarterIndex = (rotation.nextStarterIndex + 1) % rotation.orderedStartingPitcherIds.length;
+        const player = this.players.get(playerId);
+        if (player?.currentTeamId === teamId && this.isPlayerAvailableForGame(player)) return playerId;
+      }
+    }
+    return this.rankGameCandidates(
+      [...this.players.values()].filter((player) => player.currentTeamId === teamId && this.isPlayerAvailableForGame(player)),
+      "P",
+    )[0]?.id;
+  }
+
+  private dailyProgressError(error: unknown, date: ISODate, game: GameFixture, control: PlayableGameControl): Error {
+    const details = error instanceof Error ? error.message : String(error);
+    return new Error(
+      `Daily progress failed on ${date} for ${control} ${game.id} (${game.awayTeamId} @ ${game.homeTeamId}): ${details}`,
+    );
   }
 
   private setCurrentMatchup(liveGame: LiveGame): void {

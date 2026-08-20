@@ -258,7 +258,7 @@ function fillMap<T extends object>(
 }
 
 function statKey(item: { playerId: EntityId; seasonId: EntityId; teamId?: EntityId; split: "TEAM" | "TOTAL" }): string {
-  return `${item.playerId}:${item.seasonId}:${item.split}:${item.teamId ?? "TOTAL"}`;
+  return `${item.seasonId}:${item.playerId}:${item.split}:${item.teamId ?? "TOTAL"}`;
 }
 
 function readRngState(rng: LeagueWorld["rng"]): number {
