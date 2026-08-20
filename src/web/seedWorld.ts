@@ -8,9 +8,10 @@ import {
   type ISODate,
   type Player,
 } from "../index.js";
+import { loadRealWorldSnapshot, realWorldSnapshot2026, validateRealWorldSnapshot } from "../data/real/index.js";
 import { countryNameForCode, generatePersonName, type NameCountryCode } from "./nameGenerator.js";
 
-export type SeedWorldPreset = "SMALL" | "STANDARD";
+export type SeedWorldPreset = "SMALL" | "STANDARD" | "STANDARD_TEST" | "REAL_2026";
 
 export interface SeedWorldResult {
   world: LeagueWorld;
@@ -69,7 +70,9 @@ export const seedOrganizations: SeedOrganizationConfig[] = [
 const smallOrganizations = seedOrganizations.slice(0, 4);
 
 export function createSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
-  return createStandardSeedWorld(seed, options);
+  if ((options.preset ?? "REAL_2026") === "REAL_2026") return createReal2026SeedWorld(seed, options);
+  const preset = options.preset === "STANDARD_TEST" ? "STANDARD" : options.preset;
+  return createWorld(seed, { ...options, ...(preset ? { preset } : {}) });
 }
 
 export function createSmallSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
@@ -78,6 +81,123 @@ export function createSmallSeedWorld(seed = 20270403, options: SeedWorldOptions 
 
 export function createStandardSeedWorld(seed = 20270403, options: SeedWorldOptions = {}): SeedWorldResult {
   return createWorld(seed, { ...options, preset: "STANDARD" });
+}
+
+export function createReal2026SeedWorld(seed = 20260401, options: SeedWorldOptions = {}): SeedWorldResult {
+  const importResult = loadRealWorldSnapshot(realWorldSnapshot2026, seed);
+  const world = importResult.world;
+  const season = world.createSeason({
+    id: "real_season_kbo_2026",
+    leagueId: "real_league_kbo",
+    year: 2026,
+    name: "2026 KBO League",
+    startDate: "2026-03-01",
+    regularSeasonEndDate: "2026-10-31",
+    postseasonEndDate: "2026-11-30",
+    status: "PRESEASON",
+    allowDraws: true,
+    hasPostseason: true,
+  });
+  const competition = world.createCompetition({
+    id: "real_competition_kbo_regular_2026",
+    seasonId: season.id,
+    leagueId: season.leagueId,
+    name: "2026 KBO League Regular Season",
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: [...world.teams.values()]
+      .filter((team) => team.leagueId === "real_league_kbo" && team.isTopLevel)
+      .map((team) => team.id),
+  });
+  const draft = world.createDraft({
+    id: "real_draft_kbo_2026",
+    leagueId: "real_league_kbo",
+    seasonId: season.id,
+    year: 2026,
+    rounds: 1,
+    draftOrder: [...world.organizations.values()]
+      .filter((organization) => organization.primaryLeagueId === "real_league_kbo")
+      .map((organization) => organization.id),
+  });
+  addScopedSeasonShell(world, "real_league_mlb", "real_season_mlb_2026", "real_competition_mlb_regular_2026", 2026);
+  addScopedSeasonShell(world, "real_league_npb", "real_season_npb_2026", "real_competition_npb_regular_2026", 2026);
+
+  const selectedOrganizationId = options.startMode === "UNEMPLOYED"
+    ? undefined
+    : (options.organizationId && world.organizations.has(options.organizationId) ? options.organizationId : "real_org_kbo_lg");
+  const selectedTeam = selectedOrganizationId
+    ? [...world.teams.values()].find((team) => team.organizationId === selectedOrganizationId && team.isTopLevel)
+    : undefined;
+  const managerCode = (options.managerNationalityCode as NameCountryCode) ?? "KR";
+  const generated = generatePersonName(managerCode, seed, "real_mgr_user", 0);
+  const userManagerId = "real_mgr_user";
+  world.addManager({
+    id: userManagerId,
+    name: options.managerName ?? generated.name,
+    birthDate: "1984-03-01",
+    nationality: countryNameForCode(options.managerNationalityCode),
+    nationalityCode: options.managerNationalityCode ?? "KR",
+    status: "UNEMPLOYED",
+    reputation: 45,
+  });
+  if (selectedTeam && selectedOrganizationId) {
+    world.registerManagerContract({
+      id: "real_mgr_user_contract_2026",
+      managerId: userManagerId,
+      organizationId: selectedOrganizationId,
+      teamId: selectedTeam.id,
+      role: "MANAGER",
+      startDate: "2026-03-01",
+      endDate: "2026-12-31",
+      salary: 120000000,
+      currency: world.countries.get("country_kr")?.currencyCode ?? "KRW",
+      status: "ACTIVE",
+    });
+  }
+  world.assertInvariants();
+  void importResult;
+  return {
+    world,
+    userManagerId,
+    userTeamId: selectedTeam?.id ?? "team_real_org_kbo_lg_top",
+    seasonId: season.id,
+    competitionId: competition.id,
+    draftId: draft.id,
+    seed,
+    preset: "REAL_2026",
+  };
+}
+
+export function validateReal2026SeedData() {
+  return validateRealWorldSnapshot(realWorldSnapshot2026);
+}
+
+function addScopedSeasonShell(world: LeagueWorld, leagueId: EntityId, seasonId: EntityId, competitionId: EntityId, year: number): void {
+  const season = world.createSeason({
+    id: seasonId,
+    leagueId,
+    year,
+    name: `${year} ${world.leagues.get(leagueId)?.name ?? leagueId}`,
+    startDate: `${year}-03-01` as ISODate,
+    regularSeasonEndDate: `${year}-10-31` as ISODate,
+    postseasonEndDate: `${year}-11-30` as ISODate,
+    status: "PRESEASON",
+    allowDraws: false,
+    hasPostseason: true,
+  });
+  world.createCompetition({
+    id: competitionId,
+    seasonId: season.id,
+    leagueId,
+    name: `${season.name} Regular Season`,
+    type: "REGULAR_SEASON",
+    startDate: season.startDate,
+    endDate: season.regularSeasonEndDate,
+    participatingTeamIds: [...world.teams.values()]
+      .filter((team) => team.leagueId === leagueId && team.isTopLevel)
+      .map((team) => team.id),
+  });
 }
 
 function createWorld(seed: number, options: SeedWorldOptions): SeedWorldResult {

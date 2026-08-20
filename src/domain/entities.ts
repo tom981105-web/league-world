@@ -26,7 +26,7 @@ import type {
   ManagerRole,
   ManagerStatus,
   PersonType,
-  PlateAppearanceResult,
+  PlayByPlayResult,
   PitchingLeaderCategory,
   PlayerStatus,
   PostingStatus,
@@ -45,6 +45,20 @@ export interface Country {
   id: EntityId;
   code: string;
   name: string;
+  displayName?: string;
+  currencyCode?: string;
+  baseballRegion?: string;
+  playableStatus?: "PLAYABLE" | "STRUCTURE_READY" | "PLAYER_DB_PENDING" | "UNAVAILABLE";
+  leagueIds?: EntityId[];
+  externalIds?: Record<string, string>;
+}
+
+export interface LeagueSubdivision {
+  id: EntityId;
+  name: string;
+  displayName?: string;
+  type: "SUBLEAGUE" | "DIVISION";
+  parentSubdivisionId?: EntityId;
 }
 
 export interface League {
@@ -53,6 +67,14 @@ export interface League {
   name: string;
   level: number;
   category: LeagueCategory;
+  displayName?: string;
+  shortName?: string;
+  parentLeagueId?: EntityId;
+  subdivisions?: LeagueSubdivision[];
+  competitionLevel?: string;
+  strengthRating?: number;
+  currencyCode?: string;
+  externalIds?: Record<string, string>;
   allowDraws?: boolean;
   usesDH?: boolean;
   regulationInnings?: number;
@@ -72,10 +94,21 @@ export interface Team {
   leagueId: EntityId;
   organizationId?: EntityId;
   name: string;
+  displayName?: string;
+  shortName?: string;
+  city?: string;
   teamType: TeamType;
   parentTeamId?: EntityId;
   rosterLevel?: number;
   rosterLevelName?: string;
+  levelCode?: string;
+  levelName?: string;
+  levelOrder?: number;
+  affiliateRelation?: string;
+  subLeagueId?: EntityId;
+  divisionId?: EntityId;
+  externalIds?: Record<string, string>;
+  logoUrl?: string;
   isTopLevel?: boolean;
 }
 
@@ -83,11 +116,21 @@ export interface Organization {
   id: EntityId;
   name: string;
   countryId: EntityId;
+  displayName?: string;
+  shortName?: string;
+  city?: string;
+  primaryLeagueId?: EntityId;
+  subLeagueId?: EntityId;
+  divisionId?: EntityId;
+  externalIds?: Record<string, string>;
 }
 
 export interface Player {
   id: EntityId;
   name: string;
+  legalName?: string;
+  displayName?: string;
+  externalIds?: Record<string, string>;
   birthDate: ISODate;
   age: number;
   nationality: string;
@@ -98,6 +141,13 @@ export interface Player {
   secondaryPositions: string[];
   heightCm?: number;
   weightKg?: number;
+  jerseyNumber?: string;
+  currentRosterLevel?: string;
+  realWorld?: RealWorldEntityMetadata;
+  ratingMetadata?: PlayerRatingMetadata;
+  preGameCareerEntries?: CareerEntry[];
+  headshotUrl?: string;
+  imageUrl?: string;
   status: PlayerStatus;
   trueCurrentAbility: number;
   truePotentialAbility: number;
@@ -120,6 +170,22 @@ export interface Player {
   rosterAssignments: RosterAssignment[];
   contracts: PlayerContract[];
   careerEntries: CareerEntry[];
+}
+
+export interface RealWorldEntityMetadata {
+  snapshotId: EntityId;
+  snapshotYear: number;
+  source: "REAL" | "GENERATED" | "FICTIONAL_TEST";
+  sourceName?: string;
+  provenance?: string;
+  isGenerated?: boolean;
+  generatedYear?: number;
+}
+
+export interface PlayerRatingMetadata {
+  ratingModelVersion: string;
+  source: "HEURISTIC" | "IMPORTED" | "GENERATED" | "FICTIONAL_TEST";
+  derivedFrom?: string[];
 }
 
 export interface Scout {
@@ -502,6 +568,7 @@ export interface CareerEntry {
   winningPercentage?: number;
   championships?: number;
   endReason?: string;
+  historySource?: "REAL" | "SIMULATED" | "FICTIONAL_TEST";
 }
 
 export interface WorldEvent {
@@ -648,10 +715,13 @@ export interface PlayByPlayEvent {
   half: GameHalf;
   batterId: EntityId;
   pitcherId: EntityId;
-  result: PlateAppearanceResult;
+  result: PlayByPlayResult;
   runsScored: number;
   outsAfter: number;
   scoreAfter: GameResult;
+  runnerId?: EntityId;
+  fielderId?: EntityId;
+  metadata?: Record<string, unknown>;
 }
 
 export interface BoxScore {
@@ -684,7 +754,13 @@ export interface BatterGameLine {
   triples: number;
   homeRuns: number;
   walks: number;
+  hitByPitch: number;
   strikeouts: number;
+  sacrificeFlies: number;
+  sacrificeHits: number;
+  groundedIntoDoublePlays: number;
+  stolenBases: number;
+  caughtStealing: number;
   runs: number;
   runsBattedIn: number;
 }
@@ -718,7 +794,13 @@ export interface PlayerBattingSeasonStats {
   homeRuns: number;
   runsBattedIn: number;
   walks: number;
+  hitByPitch: number;
   strikeouts: number;
+  sacrificeFlies: number;
+  sacrificeHits: number;
+  groundedIntoDoublePlays: number;
+  stolenBases: number;
+  caughtStealing: number;
   average: number;
   onBasePercentage: number;
   sluggingPercentage: number;

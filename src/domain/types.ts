@@ -94,13 +94,24 @@ export type LiveGameStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 export type PlateAppearanceResult =
   | "STRIKEOUT"
   | "WALK"
+  | "HIT_BY_PITCH"
   | "SINGLE"
   | "DOUBLE"
   | "TRIPLE"
   | "HOME_RUN"
   | "GROUND_OUT"
   | "FLY_OUT"
-  | "LINE_OUT";
+  | "LINE_OUT"
+  | "DOUBLE_PLAY"
+  | "SACRIFICE_FLY"
+  | "SACRIFICE_BUNT"
+  | "ERROR";
+
+export type BaseRunningEventResult =
+  | "STOLEN_BASE"
+  | "CAUGHT_STEALING";
+
+export type PlayByPlayResult = PlateAppearanceResult | BaseRunningEventResult;
 
 export type BattingLeaderCategory = "AVG" | "HR" | "RBI" | "H" | "OPS";
 

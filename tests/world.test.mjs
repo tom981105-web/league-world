@@ -2318,6 +2318,149 @@ test("milestone events are recorded for first hit, first homer, and first win", 
   assert.ok(milestones.some((event) => event.subjectId === awayPlayers.at(-1)) || milestones.some((event) => event.subjectId === homePlayers.at(-1)));
 });
 
+test("expanded plate appearance events update bases, box score, and season stats", () => {
+  const world = createWorld();
+  const { game, awayPlayers } = createReadyGame(world, {
+    league: { regulationInnings: 1, allowExtraInnings: false },
+  });
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+
+  liveGame.bases = { first: awayPlayers[8], second: awayPlayers[9], third: awayPlayers[10] };
+  const hbp = world.applyPlateAppearanceResult(game.id, "HIT_BY_PITCH");
+  assert.equal(hbp.runsScored, 1);
+  assert.equal(liveGame.boxScore.batters[awayPlayers[0]].hitByPitch, 1);
+  assert.equal(liveGame.boxScore.batters[awayPlayers[0]].atBats, 0);
+
+  liveGame.bases = { first: awayPlayers[8], second: null, third: null };
+  const dp = world.applyPlateAppearanceResult(game.id, "DOUBLE_PLAY");
+  assert.equal(dp.outsAfter, 2);
+  assert.equal(liveGame.bases.first, null);
+  assert.equal(liveGame.boxScore.batters[awayPlayers[1]].groundedIntoDoublePlays, 1);
+
+  liveGame.bases = { first: null, second: null, third: awayPlayers[8] };
+  const sf = world.applyPlateAppearanceResult(game.id, "SACRIFICE_FLY");
+  assert.equal(sf.runsScored, 1);
+  assert.equal(liveGame.boxScore.batters[awayPlayers[2]].sacrificeFlies, 1);
+  world.applyPlateAppearanceResult(game.id, "STRIKEOUT");
+  world.applyPlateAppearanceResult(game.id, "GROUND_OUT");
+  world.applyPlateAppearanceResult(game.id, "FLY_OUT");
+  assert.equal(liveGame.status, "COMPLETED");
+
+  const hbpStats = world.getPlayerBattingSeasonStats(awayPlayers[0], game.seasonId)[0];
+  const dpStats = world.getPlayerBattingSeasonStats(awayPlayers[1], game.seasonId)[0];
+  const sfStats = world.getPlayerBattingSeasonStats(awayPlayers[2], game.seasonId)[0];
+  assert.equal(hbpStats.hitByPitch, 1);
+  assert.equal(dpStats.groundedIntoDoublePlays, 1);
+  assert.equal(sfStats.sacrificeFlies, 1);
+});
+
+test("sacrifice bunt, error, and steals have dedicated play-by-play and scorekeeping", () => {
+  const world = createWorld(703);
+  const { game, awayPlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+
+  liveGame.bases = { first: awayPlayers[8], second: null, third: null };
+  const bunt = world.applyPlateAppearanceResult(game.id, "SACRIFICE_BUNT");
+  assert.equal(bunt.result, "SACRIFICE_BUNT");
+  assert.equal(liveGame.bases.second, awayPlayers[8]);
+  assert.equal(liveGame.boxScore.batters[awayPlayers[0]].sacrificeHits, 1);
+
+  liveGame.bases = { first: awayPlayers[5], second: null, third: null };
+  const beforeErrors = liveGame.boxScore.teams.home.errors;
+  const error = world.applyPlateAppearanceResult(game.id, "ERROR");
+  assert.equal(error.result, "ERROR");
+  assert.equal(liveGame.boxScore.teams.home.errors, beforeErrors + 1);
+  assert.equal(liveGame.boxScore.pitchers[liveGame.currentPitcherId].earnedRuns, 0);
+  const batterSnapshot = (playerId) => ({
+    plateAppearances: liveGame.boxScore.batters[playerId]?.plateAppearances ?? 0,
+    atBats: liveGame.boxScore.batters[playerId]?.atBats ?? 0,
+  });
+  const pitcherSnapshot = (playerId) => ({
+    battersFaced: liveGame.boxScore.pitchers[playerId]?.battersFaced ?? 0,
+  });
+
+  const runner = awayPlayers[6];
+  liveGame.bases = { first: runner, second: null, third: null };
+  const stealBatterId = liveGame.currentBatterId;
+  const stealPitcherId = liveGame.currentPitcherId;
+  const stealLineupIndex = liveGame.awayLineupIndex;
+  const stealBatterLineBefore = batterSnapshot(stealBatterId);
+  const stealPitcherLineBefore = pitcherSnapshot(stealPitcherId);
+  const originalNext = world.rng.next.bind(world.rng);
+  const rolls = [0, 0];
+  world.rng.next = () => rolls.shift() ?? originalNext();
+  const steal = world.maybeAttemptSteal(game.id);
+  assert.equal(steal.result, "STOLEN_BASE");
+  assert.equal(liveGame.bases.second, runner);
+  assert.equal(liveGame.boxScore.batters[runner].stolenBases, 1);
+  assert.equal(liveGame.currentBatterId, stealBatterId);
+  assert.equal(liveGame.currentPitcherId, stealPitcherId);
+  assert.equal(liveGame.awayLineupIndex, stealLineupIndex);
+  assert.deepEqual(batterSnapshot(stealBatterId), stealBatterLineBefore);
+  assert.deepEqual(pitcherSnapshot(stealPitcherId), stealPitcherLineBefore);
+
+  const caughtRunner = awayPlayers[7];
+  liveGame.bases = { first: caughtRunner, second: null, third: null };
+  const caughtBatterId = liveGame.currentBatterId;
+  const caughtPitcherId = liveGame.currentPitcherId;
+  const caughtLineupIndex = liveGame.awayLineupIndex;
+  const caughtBatterLineBefore = batterSnapshot(caughtBatterId);
+  const caughtPitcherLineBefore = pitcherSnapshot(caughtPitcherId);
+  const caughtRolls = [0, 1];
+  world.rng.next = () => caughtRolls.shift() ?? originalNext();
+  const caught = world.maybeAttemptSteal(game.id);
+  assert.equal(caught.result, "CAUGHT_STEALING");
+  assert.equal(liveGame.boxScore.batters[caughtRunner].caughtStealing, 1);
+  assert.equal(liveGame.currentBatterId, caughtBatterId);
+  assert.equal(liveGame.currentPitcherId, caughtPitcherId);
+  assert.equal(liveGame.awayLineupIndex, caughtLineupIndex);
+  assert.deepEqual(batterSnapshot(caughtBatterId), caughtBatterLineBefore);
+  assert.deepEqual(pitcherSnapshot(caughtPitcherId), caughtPitcherLineBefore);
+
+  const thirdOutRunner = awayPlayers[8];
+  liveGame.outs = 2;
+  liveGame.bases = { first: thirdOutRunner, second: null, third: null };
+  const thirdOutLineupIndex = liveGame.awayLineupIndex;
+  const thirdOutBatterLineBefore = batterSnapshot(liveGame.currentBatterId);
+  const thirdOutPitcherLineBefore = pitcherSnapshot(liveGame.currentPitcherId);
+  const thirdOutRolls = [0, 1];
+  world.rng.next = () => thirdOutRolls.shift() ?? originalNext();
+  const thirdOutCaught = world.maybeAttemptSteal(game.id);
+  world.rng.next = originalNext;
+  assert.equal(thirdOutCaught.result, "CAUGHT_STEALING");
+  assert.equal(liveGame.half, "BOTTOM");
+  assert.equal(liveGame.awayLineupIndex, thirdOutLineupIndex);
+  assert.deepEqual(batterSnapshot(thirdOutCaught.batterId), thirdOutBatterLineBefore);
+  assert.deepEqual(pitcherSnapshot(thirdOutCaught.pitcherId), thirdOutPitcherLineBefore);
+  assert.ok(liveGame.playByPlay.some((event) => event.result === "STOLEN_BASE"));
+  assert.ok(liveGame.playByPlay.some((event) => event.result === "CAUGHT_STEALING"));
+});
+
+test("weak out-of-position defense can turn batted outs into errors deterministically", () => {
+  const world = createWorld(704);
+  const { game, homePlayers } = createReadyGame(world);
+  world.startGame(game.id);
+  const liveGame = world.liveGames.get(game.id);
+  for (const playerId of homePlayers.slice(0, 9)) {
+    world.players.get(playerId).battingRatings.fielding = 0;
+  }
+  liveGame.currentDefense.team_seoul = liveGame.currentDefense.team_seoul.map((slot) => ({
+    ...slot,
+    positionFit: 0,
+    outOfPosition: true,
+  }));
+  const originalNext = world.rng.next.bind(world.rng);
+  world.rng.next = () => 0;
+  const event = world.applyPlateAppearanceResult(game.id, "GROUND_OUT", { resolveContext: true });
+  world.rng.next = originalNext;
+
+  assert.equal(event.result, "ERROR");
+  assert.equal(liveGame.boxScore.teams.home.errors, 1);
+  assert.equal(liveGame.boxScore.batters[event.batterId].hits, 0);
+});
+
 test("season stats invariants catch invalid local mutations", () => {
   const world = createWorld();
   const { game, awayPlayers } = createReadyGame(world, {

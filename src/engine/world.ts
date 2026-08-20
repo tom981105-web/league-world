@@ -84,6 +84,7 @@ import type {
   TradeAiDecision,
   WorldEventType,
 } from "../domain/types.js";
+import type { RealWorldSnapshotMetadata } from "../data/real/types.js";
 import {
   chooseCareerOption,
   chooseManagerCareerOption,
@@ -254,6 +255,13 @@ interface GameBalanceConfig {
   tripleSpeedInfluence: number;
   homeRunBase: number;
   homeRunPowerInfluence: number;
+  hitByPitchBase: number;
+  babipBase: number;
+  errorBase: number;
+  doublePlayBase: number;
+  sacrificeFlyBase: number;
+  stealAttemptBase: number;
+  sacrificeBuntAttemptBase: number;
   groundOutBase: number;
   flyOutBase: number;
   lineOutBase: number;
@@ -276,6 +284,13 @@ const GAME_BALANCE: GameBalanceConfig = {
   tripleSpeedInfluence: 0.006,
   homeRunBase: 2.05,
   homeRunPowerInfluence: 0.035,
+  hitByPitchBase: 0.7,
+  babipBase: 0.285,
+  errorBase: 0.018,
+  doublePlayBase: 0.28,
+  sacrificeFlyBase: 0.46,
+  stealAttemptBase: 0.012,
+  sacrificeBuntAttemptBase: 0.006,
   groundOutBase: 20,
   flyOutBase: 17.5,
   lineOutBase: 9,
@@ -367,6 +382,8 @@ export class LeagueWorld {
   readonly tradeProposals = new Map<EntityId, TradeProposal>();
   readonly postingRequests = new Map<EntityId, PostingRequest>();
   readonly events: WorldEvent[] = [];
+  realWorldSnapshot?: RealWorldSnapshotMetadata;
+  private invariantSuppressionDepth = 0;
 
   constructor(
     readonly clock: WorldClock,
@@ -381,6 +398,10 @@ export class LeagueWorld {
   addLeague(league: League): void {
     this.requireCountry(league.countryId);
     this.leagues.set(league.id, structuredClone(league));
+    const country = this.countries.get(league.countryId);
+    if (country) {
+      country.leagueIds = [...new Set([...(country.leagueIds ?? []), league.id])];
+    }
   }
 
   addOrganization(organization: Organization): void {
@@ -1590,6 +1611,7 @@ export class LeagueWorld {
       pitcher.pitchingRatings.movement * 0.35 -
       pitcher.pitchingRatings.pitchQuality * 0.55 +
       conditionEdge;
+    const babipEdge = this.babipEdge(batter, pitcher);
     const strikeoutEdge =
       pitcher.pitchingRatings.velocity * 0.45 +
       pitcher.pitchingRatings.pitchQuality * 0.45 -
@@ -1597,22 +1619,26 @@ export class LeagueWorld {
       batter.battingRatings.plateDiscipline * 0.2 -
       conditionEdge;
 
-    const weights: Record<PlateAppearanceResult, number> = {
+    const weights: Partial<Record<PlateAppearanceResult, number>> = {
       STRIKEOUT: this.clampWeight(GAME_BALANCE.strikeoutBase + strikeoutEdge * GAME_BALANCE.strikeoutAbilityInfluence),
       WALK: this.clampWeight(GAME_BALANCE.walkBase + disciplineEdge * GAME_BALANCE.walkAbilityInfluence),
+      HIT_BY_PITCH: this.clampWeight(GAME_BALANCE.hitByPitchBase + (100 - pitcher.pitchingRatings.control) * 0.004),
       SINGLE: this.clampWeight(
         GAME_BALANCE.singleBase +
         contactEdge * GAME_BALANCE.singleContactInfluence +
+        babipEdge * 7 +
         batter.battingRatings.speed * 0.008,
       ),
       DOUBLE: this.clampWeight(
         GAME_BALANCE.doubleBase +
         powerEdge * GAME_BALANCE.doublePowerInfluence +
+        babipEdge * 1.6 +
         contactEdge * 0.012,
       ),
       TRIPLE: this.clampWeight(
         GAME_BALANCE.tripleBase +
         batter.battingRatings.speed * GAME_BALANCE.tripleSpeedInfluence +
+        babipEdge * 0.4 +
         contactEdge * 0.004,
       ),
       HOME_RUN: this.clampWeight(
@@ -1633,11 +1659,19 @@ export class LeagueWorld {
       throw new Error(`Game is not in progress: ${gameId}`);
     }
     this.runManagerAi(gameId, this.defenseTeamId(this.requireGame(gameId), liveGame.half));
+    const stealEvent = this.maybeAttemptSteal(gameId);
+    if (stealEvent) return stealEvent;
+    const buntEvent = this.maybeAttemptSacrificeBunt(gameId);
+    if (buntEvent) return buntEvent;
     const result = this.simulatePlateAppearance(liveGame.currentBatterId, liveGame.currentPitcherId);
-    return this.applyPlateAppearanceResult(gameId, result);
+    return this.applyPlateAppearanceResult(gameId, result, { resolveContext: true });
   }
 
-  applyPlateAppearanceResult(gameId: EntityId, result: PlateAppearanceResult): PlayByPlayEvent {
+  applyPlateAppearanceResult(
+    gameId: EntityId,
+    result: PlateAppearanceResult,
+    options: { resolveContext?: boolean } = {},
+  ): PlayByPlayEvent {
     const liveGame = this.requireLiveGame(gameId);
     if (liveGame.status !== "IN_PROGRESS") {
       throw new Error(`Game is not in progress: ${gameId}`);
@@ -1651,9 +1685,12 @@ export class LeagueWorld {
     const defenseTeamId = this.defenseTeamId(game, liveGame.half);
     const batterId = liveGame.currentBatterId;
     const pitcherId = liveGame.currentPitcherId;
-    const { runsScored, scoredPlayerIds, rbiCredit } = this.advanceBases(liveGame, result, batterId);
-    const outsAdded = this.outsForResult(result);
-    liveGame.outs += outsAdded;
+    const officialResult = options.resolveContext
+      ? this.resolveBattedBallResult(liveGame, defenseTeamId, result)
+      : result;
+    const { runsScored, scoredPlayerIds, rbiCredit, fielderId } = this.advanceBases(liveGame, officialResult, batterId, defenseTeamId);
+    const officialOutsAdded = this.outsForResult(officialResult);
+    liveGame.outs += officialOutsAdded;
     if (liveGame.half === "TOP") {
       liveGame.awayScore += runsScored;
     } else {
@@ -1666,13 +1703,14 @@ export class LeagueWorld {
       defenseTeamId,
       batterId,
       pitcherId,
-      result,
+      officialResult,
       runsScored,
       scoredPlayerIds,
       rbiCredit,
-      outsAdded,
+      officialOutsAdded,
+      fielderId,
     );
-    this.applyGameFatigue(batterId, pitcherId, result);
+    this.applyGameFatigue(batterId, pitcherId, officialResult);
     this.advanceLineupIndex(liveGame, game);
 
     const event: PlayByPlayEvent = {
@@ -1680,10 +1718,11 @@ export class LeagueWorld {
       half: liveGame.half,
       batterId,
       pitcherId,
-      result,
+      result: officialResult,
       runsScored,
       outsAfter: liveGame.outs,
       scoreAfter: { homeScore: liveGame.homeScore, awayScore: liveGame.awayScore },
+      ...(fielderId ? { fielderId } : {}),
     };
     liveGame.playByPlay.push(event);
 
@@ -1933,16 +1972,19 @@ export class LeagueWorld {
   }
 
   simulateGame(gameId: EntityId): LiveGame {
-    if (!this.liveGames.has(gameId)) this.startGame(gameId);
-    let plateAppearances = 0;
-    while (this.requireLiveGame(gameId).status === "IN_PROGRESS") {
-      this.simulateNextPlateAppearance(gameId);
-      plateAppearances += 1;
-      if (plateAppearances > 2000) {
-        throw new Error(`Game simulation exceeded safety limit: ${gameId}`);
+    return this.withInvariantChecksSuppressed(() => {
+      if (!this.liveGames.has(gameId)) this.startGame(gameId);
+      let plateAppearances = 0;
+      while (this.requireLiveGame(gameId).status === "IN_PROGRESS") {
+        this.simulateNextPlateAppearance(gameId);
+        plateAppearances += 1;
+        if (plateAppearances > 2000) {
+          throw new Error(`Game simulation exceeded safety limit: ${gameId}`);
+        }
       }
-    }
-    return structuredClone(this.requireLiveGame(gameId));
+      this.assertInvariantsNow();
+      return structuredClone(this.requireLiveGame(gameId));
+    });
   }
 
   addPlayer(player: PlayerInput): void {
@@ -2950,6 +2992,7 @@ export class LeagueWorld {
 
   validateInvariants(): string[] {
     const issues: string[] = [];
+    this.validateWorldHierarchyInvariants(issues);
     this.validateSeasonAndScheduleInvariants(issues);
     this.validateGameRosterInvariants(issues);
     this.validateScoutingAndDraftInvariants(issues);
@@ -3033,10 +3076,86 @@ export class LeagueWorld {
     return issues;
   }
 
+  private validateWorldHierarchyInvariants(issues: string[]): void {
+    if (this.realWorldSnapshot && !this.realWorldSnapshot.snapshotId) {
+      issues.push("RealWorldSnapshot metadata requires snapshotId");
+    }
+    for (const country of this.countries.values()) {
+      for (const leagueId of country.leagueIds ?? []) {
+        const league = this.leagues.get(leagueId);
+        if (!league) issues.push(`Country ${country.id} references missing league ${leagueId}`);
+        if (league && league.countryId !== country.id) issues.push(`Country ${country.id} leagueIds contains league from another country ${leagueId}`);
+      }
+    }
+    for (const league of this.leagues.values()) {
+      if (!this.countries.has(league.countryId)) issues.push(`League ${league.id} has missing country ${league.countryId}`);
+      if (league.parentLeagueId && !this.leagues.has(league.parentLeagueId)) issues.push(`League ${league.id} has missing parent league ${league.parentLeagueId}`);
+      this.validateOptionalRating(league.strengthRating, `League ${league.id} strengthRating`, issues);
+      for (const subdivision of league.subdivisions ?? []) {
+        if (subdivision.parentSubdivisionId && !(league.subdivisions ?? []).some((candidate) => candidate.id === subdivision.parentSubdivisionId)) {
+          issues.push(`League ${league.id} subdivision ${subdivision.id} has missing parent subdivision`);
+        }
+      }
+    }
+    for (const organization of this.organizations.values()) {
+      if (!this.countries.has(organization.countryId)) issues.push(`Organization ${organization.id} has missing country ${organization.countryId}`);
+      if (organization.primaryLeagueId && !this.leagues.has(organization.primaryLeagueId)) {
+        issues.push(`Organization ${organization.id} has missing primary league ${organization.primaryLeagueId}`);
+      }
+    }
+    for (const team of this.teams.values()) {
+      const league = this.leagues.get(team.leagueId);
+      const organization = team.organizationId ? this.organizations.get(team.organizationId) : undefined;
+      if (!league) issues.push(`Team ${team.id} has missing league ${team.leagueId}`);
+      if (team.organizationId && !organization) issues.push(`Team ${team.id} has missing organization ${team.organizationId}`);
+      if (team.parentTeamId) {
+        const parent = this.teams.get(team.parentTeamId);
+        if (!parent) issues.push(`Team ${team.id} has missing parent team ${team.parentTeamId}`);
+        if (parent?.organizationId && team.organizationId && parent.organizationId !== team.organizationId) {
+          issues.push(`Team ${team.id} parent team belongs to another organization`);
+        }
+      }
+      const isCanadianMlbSystem = organization?.countryId === "country_ca" && (league?.id === "real_league_mlb" || league?.parentLeagueId === "real_league_mlb");
+      if (league && organization && league.countryId !== organization.countryId && !isCanadianMlbSystem) {
+        issues.push(`Team ${team.id} league country does not match organization country`);
+      }
+    }
+    for (const player of this.players.values()) {
+      if (player.realWorld?.snapshotId && this.realWorldSnapshot && player.realWorld.snapshotId !== this.realWorldSnapshot.snapshotId) {
+        issues.push(`Player ${player.id} realWorld snapshot does not match world snapshot`);
+      }
+      if (player.realWorld?.source === "REAL" && Object.keys(player.externalIds ?? {}).length === 0) {
+        issues.push(`Real player ${player.id} requires externalIds`);
+      }
+      if (player.currentTeamId) {
+        const team = this.teams.get(player.currentTeamId);
+        if (team) {
+          const league = this.leagues.get(team.leagueId);
+          const currentCountryId = league?.countryId;
+          if (!currentCountryId) issues.push(`Player ${player.id} current team has no activity country`);
+        }
+      }
+    }
+  }
+
   assertInvariants(): void {
+    if (this.invariantSuppressionDepth > 0) return;
+    this.assertInvariantsNow();
+  }
+
+  private assertInvariantsNow(): void {
     const issues = this.validateInvariants();
     if (issues.length > 0) {
       throw new Error(`World invariant violation: ${issues.join("; ")}`);
+    }
+  }
+
+  private withInvariantChecksSuppressed<T>(fn: () => T): T {
+    this.invariantSuppressionDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this.invariantSuppressionDepth -= 1;
     }
   }
 
@@ -3934,12 +4053,189 @@ export class LeagueWorld {
   private applyGameFatigue(batterId: EntityId, pitcherId: EntityId, result: PlateAppearanceResult): void {
     const batter = this.requirePlayer(batterId);
     const pitcher = this.requirePlayer(pitcherId);
-    const batterCost = this.isHit(result) ? 2 : result === "WALK" ? 1 : 0.8;
-    const pitcherCost = 1.8 + (result === "WALK" ? 0.8 : 0) + (this.isHit(result) ? 0.5 : 0);
+    const batterCost = this.isHit(result) ? 2 : result === "WALK" || result === "HIT_BY_PITCH" ? 1 : 0.8;
+    const pitcherCost = 1.8 + (result === "WALK" || result === "HIT_BY_PITCH" ? 0.8 : 0) + (this.isHit(result) ? 0.5 : 0);
     batter.gameCondition.fatigue = this.clampRating(batter.gameCondition.fatigue + batterCost);
     batter.gameCondition.readiness = this.clampRating(batter.gameCondition.readiness - batterCost * 0.25);
     pitcher.gameCondition.fatigue = this.clampRating(pitcher.gameCondition.fatigue + pitcherCost * (1.2 - pitcher.pitchingRatings.stamina / 200));
     pitcher.gameCondition.readiness = this.clampRating(pitcher.gameCondition.readiness - pitcherCost * 0.35);
+  }
+
+  private maybeAttemptSteal(gameId: EntityId): PlayByPlayEvent | undefined {
+    const liveGame = this.requireLiveGame(gameId);
+    const game = this.requireGame(gameId);
+    const offenseTeamId = this.offenseTeamId(game, liveGame.half);
+    const defenseTeamId = this.defenseTeamId(game, liveGame.half);
+    const strategy = liveGame.strategies[offenseTeamId] ?? this.defaultManagerGameStrategy();
+    const target = this.stealTarget(liveGame.bases);
+    if (!target) return undefined;
+    const runner = this.requirePlayer(target.runnerId);
+    const attemptChance =
+      GAME_BALANCE.stealAttemptBase *
+      (0.45 + strategy.stealAggression / 70) *
+      (0.45 + runner.battingRatings.speed / 95);
+    if (this.rng.next() >= attemptChance) return undefined;
+
+    const pitcher = this.requirePlayer(liveGame.currentPitcherId);
+    const catcherArm = this.catcherArm(liveGame, defenseTeamId);
+    const successChance = this.clampProbability(
+      0.54 +
+      (runner.battingRatings.speed - 50) * 0.0045 -
+      (catcherArm - 50) * 0.0035 -
+      (pitcher.pitchingRatings.control - 50) * 0.0012,
+      0.22,
+      0.88,
+    );
+    const success = this.rng.next() < successChance;
+    const runnerLine = this.ensureBatterGameLine(liveGame.boxScore, target.runnerId, offenseTeamId);
+    if (success) {
+      liveGame.bases[target.from] = null;
+      liveGame.bases[target.to] = target.runnerId;
+      runnerLine.stolenBases += 1;
+    } else {
+      liveGame.bases[target.from] = null;
+      liveGame.outs += 1;
+      runnerLine.caughtStealing += 1;
+    }
+    runner.gameCondition.fatigue = this.clampRating(runner.gameCondition.fatigue + (success ? 1.5 : 1));
+    const event: PlayByPlayEvent = {
+      inning: liveGame.inning,
+      half: liveGame.half,
+      batterId: liveGame.currentBatterId,
+      pitcherId: liveGame.currentPitcherId,
+      result: success ? "STOLEN_BASE" : "CAUGHT_STEALING",
+      runsScored: 0,
+      outsAfter: liveGame.outs,
+      scoreAfter: { homeScore: liveGame.homeScore, awayScore: liveGame.awayScore },
+      runnerId: target.runnerId,
+      metadata: { from: target.from, to: target.to, successChance },
+    };
+    liveGame.playByPlay.push(event);
+    if (!success && liveGame.outs >= 3) {
+      this.advanceHalfInning(liveGame);
+    } else {
+      this.setCurrentMatchup(liveGame);
+    }
+    this.assertInvariants();
+    return structuredClone(event);
+  }
+
+  private maybeAttemptSacrificeBunt(gameId: EntityId): PlayByPlayEvent | undefined {
+    const liveGame = this.requireLiveGame(gameId);
+    if (liveGame.outs >= 2 || (!liveGame.bases.first && !liveGame.bases.second)) return undefined;
+    const game = this.requireGame(gameId);
+    const offenseTeamId = this.offenseTeamId(game, liveGame.half);
+    const strategy = liveGame.strategies[offenseTeamId] ?? this.defaultManagerGameStrategy();
+    const batter = this.requirePlayer(liveGame.currentBatterId);
+    const chance =
+      GAME_BALANCE.sacrificeBuntAttemptBase *
+      (0.35 + strategy.buntAggression / 65) *
+      (1.15 - batter.battingRatings.power / 160);
+    if (this.rng.next() >= chance) return undefined;
+    return this.applyPlateAppearanceResult(gameId, "SACRIFICE_BUNT");
+  }
+
+  private stealTarget(bases: BaseState): { runnerId: EntityId; from: keyof BaseState; to: keyof BaseState } | undefined {
+    if (bases.second && !bases.third) return { runnerId: bases.second, from: "second", to: "third" };
+    if (bases.first && !bases.second) return { runnerId: bases.first, from: "first", to: "second" };
+    return undefined;
+  }
+
+  private babipEdge(batter: Player, pitcher: Player): number {
+    const raw =
+      GAME_BALANCE.babipBase +
+      (batter.battingRatings.contact - 50) * 0.0022 +
+      (batter.battingRatings.speed - 50) * 0.0009 -
+      (pitcher.pitchingRatings.movement - 50) * 0.0016 -
+      (pitcher.pitchingRatings.pitchQuality - 50) * 0.0009;
+    return this.clampProbability(raw, 0.21, 0.37) - GAME_BALANCE.babipBase;
+  }
+
+  private resolveBattedBallResult(
+    liveGame: LiveGame,
+    defenseTeamId: EntityId,
+    result: PlateAppearanceResult,
+  ): PlateAppearanceResult {
+    if (result !== "GROUND_OUT" && result !== "FLY_OUT" && result !== "LINE_OUT") return result;
+    const defenseQuality = this.teamDefenseQuality(liveGame, defenseTeamId);
+    const batter = this.requirePlayer(liveGame.currentBatterId);
+    const outOfPositionCount = (liveGame.currentDefense[defenseTeamId] ?? []).filter((slot) => slot.outOfPosition).length;
+    const errorChance = this.clampProbability(
+      GAME_BALANCE.errorBase +
+      (55 - defenseQuality) * 0.00075 +
+      outOfPositionCount * 0.004,
+      0.004,
+      0.075,
+    );
+    if (this.rng.next() < errorChance) return "ERROR";
+
+    if (result === "GROUND_OUT" && liveGame.bases.first && liveGame.outs <= 1) {
+      const doublePlayChance = this.clampProbability(
+        GAME_BALANCE.doublePlayBase +
+        (defenseQuality - 50) * 0.002 -
+        (batter.battingRatings.speed - 50) * 0.0025,
+        0.08,
+        0.52,
+      );
+      if (this.rng.next() < doublePlayChance) return "DOUBLE_PLAY";
+    }
+
+    if (result === "FLY_OUT" && liveGame.bases.third && liveGame.outs <= 1) {
+      const runner = this.requirePlayer(liveGame.bases.third);
+      const sacrificeChance = this.clampProbability(
+        GAME_BALANCE.sacrificeFlyBase +
+        (runner.battingRatings.speed - 50) * 0.002 -
+        (this.outfieldArmQuality(liveGame, defenseTeamId) - 50) * 0.0015,
+        0.18,
+        0.78,
+      );
+      if (this.rng.next() < sacrificeChance) return "SACRIFICE_FLY";
+    }
+
+    return result;
+  }
+
+  private teamDefenseQuality(liveGame: LiveGame, teamId: EntityId): number {
+    const defenders = (liveGame.currentDefense[teamId] ?? []).filter((slot) => slot.defensivePosition !== "DH");
+    if (defenders.length === 0) return 50;
+    const total = defenders.reduce((sum, slot) => {
+      const player = this.requirePlayer(slot.playerId);
+      const positionPenalty = slot.outOfPosition ? 18 : 0;
+      const fatiguePenalty = player.gameCondition.fatigue * 0.08;
+      return sum + this.clampRating(player.battingRatings.fielding * 0.75 + slot.positionFit * 0.25 - positionPenalty - fatiguePenalty);
+    }, 0);
+    return total / defenders.length;
+  }
+
+  private outfieldArmQuality(liveGame: LiveGame, teamId: EntityId): number {
+    const outfielders = (liveGame.currentDefense[teamId] ?? []).filter((slot) => ["LF", "CF", "RF"].includes(slot.defensivePosition));
+    if (outfielders.length === 0) return 50;
+    return outfielders.reduce((sum, slot) => sum + this.requirePlayer(slot.playerId).battingRatings.arm, 0) / outfielders.length;
+  }
+
+  private catcherArm(liveGame: LiveGame, teamId: EntityId): number {
+    const catcher = (liveGame.currentDefense[teamId] ?? []).find((slot) => slot.defensivePosition === "C");
+    return catcher ? this.requirePlayer(catcher.playerId).battingRatings.arm : 50;
+  }
+
+  private randomFielderId(liveGame: LiveGame, teamId: EntityId, positions?: BaseballPosition[]): EntityId | undefined {
+    const defenders = (liveGame.currentDefense[teamId] ?? []).filter((slot) =>
+      slot.defensivePosition !== "DH" && (!positions || positions.includes(slot.defensivePosition)),
+    );
+    if (defenders.length === 0) return undefined;
+    return defenders[Math.floor(this.rng.next() * defenders.length)]?.playerId;
+  }
+
+  private runnerAdvanceChance(liveGame: LiveGame, runnerId: EntityId, defenseTeamId: EntityId, baseChance: number): boolean {
+    const runner = this.requirePlayer(runnerId);
+    const chance = this.clampProbability(
+      baseChance +
+      (runner.battingRatings.speed - 50) * 0.0035 -
+      (this.outfieldArmQuality(liveGame, defenseTeamId) - 50) * 0.002,
+      0.12,
+      0.9,
+    );
+    return this.rng.next() < chance;
   }
 
   private recoverDailyFatigue(player: Player): void {
@@ -4042,7 +4338,13 @@ export class LeagueWorld {
       stats.homeRuns += line.homeRuns;
       stats.runsBattedIn += line.runsBattedIn;
       stats.walks += line.walks;
+      stats.hitByPitch += line.hitByPitch;
       stats.strikeouts += line.strikeouts;
+      stats.sacrificeFlies += line.sacrificeFlies;
+      stats.sacrificeHits += line.sacrificeHits;
+      stats.groundedIntoDoublePlays += line.groundedIntoDoublePlays;
+      stats.stolenBases += line.stolenBases;
+      stats.caughtStealing += line.caughtStealing;
       this.refreshBattingDerived(stats);
     };
     addTo(this.ensureBattingSeasonStats(player.id, seasonId, "TOTAL"));
@@ -4103,7 +4405,13 @@ export class LeagueWorld {
       homeRuns: 0,
       runsBattedIn: 0,
       walks: 0,
+      hitByPitch: 0,
       strikeouts: 0,
+      sacrificeFlies: 0,
+      sacrificeHits: 0,
+      groundedIntoDoublePlays: 0,
+      stolenBases: 0,
+      caughtStealing: 0,
       average: 0,
       onBasePercentage: 0,
       sluggingPercentage: 0,
@@ -4156,8 +4464,9 @@ export class LeagueWorld {
   private refreshBattingDerived(stats: PlayerBattingSeasonStats): void {
     const totalBases = stats.hits + stats.doubles + stats.triples * 2 + stats.homeRuns * 3;
     stats.average = this.roundRate(stats.atBats === 0 ? 0 : stats.hits / stats.atBats);
+    const obpDenominator = stats.atBats + stats.walks + stats.hitByPitch + stats.sacrificeFlies;
     stats.onBasePercentage = this.roundRate(
-      stats.plateAppearances === 0 ? 0 : (stats.hits + stats.walks) / stats.plateAppearances,
+      obpDenominator === 0 ? 0 : (stats.hits + stats.walks + stats.hitByPitch) / obpDenominator,
     );
     stats.sluggingPercentage = this.roundRate(stats.atBats === 0 ? 0 : totalBases / stats.atBats);
     stats.onBasePlusSlugging = this.roundRate(stats.onBasePercentage + stats.sluggingPercentage);
@@ -4185,7 +4494,13 @@ export class LeagueWorld {
       total.homeRuns += stats.homeRuns;
       total.runsBattedIn += stats.runsBattedIn;
       total.walks += stats.walks;
+      total.hitByPitch += stats.hitByPitch;
       total.strikeouts += stats.strikeouts;
+      total.sacrificeFlies += stats.sacrificeFlies;
+      total.sacrificeHits += stats.sacrificeHits;
+      total.groundedIntoDoublePlays += stats.groundedIntoDoublePlays;
+      total.stolenBases += stats.stolenBases;
+      total.caughtStealing += stats.caughtStealing;
     }
     this.refreshBattingDerived(total);
     return total;
@@ -4242,7 +4557,13 @@ export class LeagueWorld {
       homeRuns: 0,
       runsBattedIn: 0,
       walks: 0,
+      hitByPitch: 0,
       strikeouts: 0,
+      sacrificeFlies: 0,
+      sacrificeHits: 0,
+      groundedIntoDoublePlays: 0,
+      stolenBases: 0,
+      caughtStealing: 0,
       average: 0,
       onBasePercentage: 0,
       sluggingPercentage: 0,
@@ -4981,14 +5302,15 @@ export class LeagueWorld {
     liveGame: LiveGame,
     result: PlateAppearanceResult,
     batterId: EntityId,
-  ): { runsScored: number; scoredPlayerIds: EntityId[]; rbiCredit: number } {
+    defenseTeamId: EntityId,
+  ): { runsScored: number; scoredPlayerIds: EntityId[]; rbiCredit: number; fielderId: EntityId | undefined } {
     const oldBases = structuredClone(liveGame.bases);
     const scoredPlayerIds: EntityId[] = [];
     const score = (playerId: EntityId | null): void => {
       if (playerId) scoredPlayerIds.push(playerId);
     };
 
-    if (result === "WALK") {
+    if (result === "WALK" || result === "HIT_BY_PITCH") {
       let second = oldBases.second;
       let third = oldBases.third;
       if (oldBases.first) {
@@ -5003,21 +5325,29 @@ export class LeagueWorld {
         second,
         third,
       };
-      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: undefined };
     }
 
     if (result === "SINGLE") {
       score(oldBases.third);
-      score(oldBases.second);
-      liveGame.bases = { first: batterId, second: oldBases.first, third: null };
-      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length };
+      const secondScores = oldBases.second && this.runnerAdvanceChance(liveGame, oldBases.second, defenseTeamId, 0.58);
+      if (secondScores) score(oldBases.second);
+      const firstToThird = oldBases.first && !oldBases.second && this.runnerAdvanceChance(liveGame, oldBases.first, defenseTeamId, 0.38);
+      liveGame.bases = {
+        first: batterId,
+        second: firstToThird ? null : oldBases.first,
+        third: secondScores ? (firstToThird ? oldBases.first : null) : oldBases.second,
+      };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: undefined };
     }
 
     if (result === "DOUBLE") {
       score(oldBases.third);
       score(oldBases.second);
-      liveGame.bases = { first: null, second: batterId, third: oldBases.first };
-      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length };
+      const firstScores = oldBases.first && this.runnerAdvanceChance(liveGame, oldBases.first, defenseTeamId, 0.42);
+      if (firstScores) score(oldBases.first);
+      liveGame.bases = { first: null, second: batterId, third: firstScores ? null : oldBases.first };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: undefined };
     }
 
     if (result === "TRIPLE") {
@@ -5025,7 +5355,7 @@ export class LeagueWorld {
       score(oldBases.second);
       score(oldBases.first);
       liveGame.bases = { first: null, second: null, third: batterId };
-      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: undefined };
     }
 
     if (result === "HOME_RUN") {
@@ -5034,14 +5364,53 @@ export class LeagueWorld {
       score(oldBases.first);
       score(batterId);
       liveGame.bases = { first: null, second: null, third: null };
-      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: undefined };
     }
 
-    return { runsScored: 0, scoredPlayerIds, rbiCredit: 0 };
+    if (result === "DOUBLE_PLAY") {
+      liveGame.bases = { ...oldBases, first: null };
+      return { runsScored: 0, scoredPlayerIds, rbiCredit: 0, fielderId: this.randomFielderId(liveGame, defenseTeamId) };
+    }
+
+    if (result === "SACRIFICE_FLY") {
+      score(oldBases.third);
+      liveGame.bases = { first: oldBases.first, second: oldBases.second, third: null };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: scoredPlayerIds.length, fielderId: this.randomFielderId(liveGame, defenseTeamId, ["LF", "CF", "RF"]) };
+    }
+
+    if (result === "SACRIFICE_BUNT") {
+      if (oldBases.third) score(oldBases.third);
+      liveGame.bases = {
+        first: null,
+        second: oldBases.first,
+        third: oldBases.second,
+      };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: 0, fielderId: this.randomFielderId(liveGame, defenseTeamId, ["P", "C", "1B", "3B"]) };
+    }
+
+    if (result === "ERROR") {
+      score(oldBases.third);
+      liveGame.bases = {
+        first: batterId,
+        second: oldBases.first,
+        third: oldBases.second,
+      };
+      return { runsScored: scoredPlayerIds.length, scoredPlayerIds, rbiCredit: 0, fielderId: this.randomFielderId(liveGame, defenseTeamId) };
+    }
+
+    return { runsScored: 0, scoredPlayerIds, rbiCredit: 0, fielderId: this.outsForResult(result) > 0 ? this.randomFielderId(liveGame, defenseTeamId) : undefined };
   }
 
   private outsForResult(result: PlateAppearanceResult): number {
-    return result === "STRIKEOUT" || result === "GROUND_OUT" || result === "FLY_OUT" || result === "LINE_OUT" ? 1 : 0;
+    if (result === "DOUBLE_PLAY") return 2;
+    return result === "STRIKEOUT" ||
+      result === "GROUND_OUT" ||
+      result === "FLY_OUT" ||
+      result === "LINE_OUT" ||
+      result === "SACRIFICE_FLY" ||
+      result === "SACRIFICE_BUNT"
+      ? 1
+      : 0;
   }
 
   private isHit(result: PlateAppearanceResult): boolean {
@@ -5067,6 +5436,7 @@ export class LeagueWorld {
     scoredPlayerIds: EntityId[],
     rbiCredit: number,
     outsAdded: number,
+    fielderId?: EntityId,
   ): void {
     const batterLine = this.ensureBatterGameLine(liveGame.boxScore, batterId, offenseTeamId);
     const pitcherLine = this.ensurePitcherGameLine(liveGame.boxScore, pitcherId, defenseTeamId);
@@ -5074,7 +5444,7 @@ export class LeagueWorld {
     pitcherLine.battersFaced += 1;
     pitcherLine.outsRecorded += outsAdded;
     pitcherLine.runs += runsScored;
-    pitcherLine.earnedRuns += runsScored;
+    pitcherLine.earnedRuns += result === "ERROR" ? 0 : runsScored;
     batterLine.runsBattedIn += rbiCredit;
     for (const scoredPlayerId of scoredPlayerIds) {
       this.ensureBatterGameLine(liveGame.boxScore, scoredPlayerId, offenseTeamId).runs += 1;
@@ -5084,10 +5454,30 @@ export class LeagueWorld {
       pitcherLine.walks += 1;
       return;
     }
+    if (result === "HIT_BY_PITCH") {
+      batterLine.hitByPitch += 1;
+      return;
+    }
+    if (result === "SACRIFICE_FLY") {
+      batterLine.sacrificeFlies += 1;
+      return;
+    }
+    if (result === "SACRIFICE_BUNT") {
+      batterLine.sacrificeHits += 1;
+      return;
+    }
     batterLine.atBats += 1;
     if (result === "STRIKEOUT") {
       batterLine.strikeouts += 1;
       pitcherLine.strikeouts += 1;
+    }
+    if (result === "DOUBLE_PLAY") {
+      batterLine.groundedIntoDoublePlays += 1;
+    }
+    if (result === "ERROR") {
+      this.teamBoxScore(liveGame.boxScore, defenseTeamId).errors += 1;
+      void fielderId;
+      return;
     }
     if (!this.isHit(result)) return;
 
@@ -5113,7 +5503,13 @@ export class LeagueWorld {
       triples: 0,
       homeRuns: 0,
       walks: 0,
+      hitByPitch: 0,
       strikeouts: 0,
+      sacrificeFlies: 0,
+      sacrificeHits: 0,
+      groundedIntoDoublePlays: 0,
+      stolenBases: 0,
+      caughtStealing: 0,
       runs: 0,
       runsBattedIn: 0,
     };
@@ -5225,7 +5621,7 @@ export class LeagueWorld {
     return league.maxInnings;
   }
 
-  private weightedPlateAppearance(weights: Record<PlateAppearanceResult, number>): PlateAppearanceResult {
+  private weightedPlateAppearance(weights: Partial<Record<PlateAppearanceResult, number>>): PlateAppearanceResult {
     const entries = Object.entries(weights) as [PlateAppearanceResult, number][];
     const total = entries.reduce((sum, [, weight]) => sum + weight, 0);
     let roll = this.rng.next() * total;
@@ -5244,6 +5640,7 @@ export class LeagueWorld {
     return [
       "STRIKEOUT",
       "WALK",
+      "HIT_BY_PITCH",
       "SINGLE",
       "DOUBLE",
       "TRIPLE",
@@ -5251,6 +5648,10 @@ export class LeagueWorld {
       "GROUND_OUT",
       "FLY_OUT",
       "LINE_OUT",
+      "DOUBLE_PLAY",
+      "SACRIFICE_FLY",
+      "SACRIFICE_BUNT",
+      "ERROR",
     ].includes(result);
   }
 
@@ -6513,6 +6914,11 @@ export class LeagueWorld {
     }
   }
 
+  private validateOptionalRating(value: number | undefined, label: string, issues: string[]): void {
+    if (value === undefined) return;
+    this.validateRating(value, label, issues);
+  }
+
   private calculateAge(birthDate: ISODate): number {
     const current = new Date(`${this.clock.now()}T00:00:00.000Z`);
     const birth = new Date(`${birthDate}T00:00:00.000Z`);
@@ -6544,9 +6950,9 @@ export class LeagueWorld {
     return Math.max(0, Math.min(100, Math.round(value)));
   }
 
-  private clampProbability(value: number): number {
-    if (value <= 0) return 0;
-    if (value >= 1) return 1;
+  private clampProbability(value: number, min = 0, max = 1): number {
+    if (value <= min) return min;
+    if (value >= max) return max;
     return value;
   }
 

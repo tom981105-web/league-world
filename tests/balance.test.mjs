@@ -7,7 +7,7 @@ function rate(numerator, denominator) {
 }
 
 function emptyLine() {
-  return { pa: 0, ab: 0, h: 0, doubles: 0, triples: 0, hr: 0, bb: 0, so: 0 };
+  return { pa: 0, ab: 0, h: 0, doubles: 0, triples: 0, hr: 0, bb: 0, hbp: 0, sf: 0, sh: 0, gidp: 0, sb: 0, cs: 0, so: 0 };
 }
 
 function addResult(line, result) {
@@ -16,8 +16,21 @@ function addResult(line, result) {
     line.bb += 1;
     return;
   }
+  if (result === "HIT_BY_PITCH") {
+    line.hbp += 1;
+    return;
+  }
+  if (result === "SACRIFICE_FLY") {
+    line.sf += 1;
+    return;
+  }
+  if (result === "SACRIFICE_BUNT") {
+    line.sh += 1;
+    return;
+  }
   line.ab += 1;
   if (result === "STRIKEOUT") line.so += 1;
+  if (result === "DOUBLE_PLAY") line.gidp += 1;
   if (["SINGLE", "DOUBLE", "TRIPLE", "HOME_RUN"].includes(result)) line.h += 1;
   if (result === "DOUBLE") line.doubles += 1;
   if (result === "TRIPLE") line.triples += 1;
@@ -26,7 +39,7 @@ function addResult(line, result) {
 
 function derived(line) {
   const totalBases = line.h + line.doubles + line.triples * 2 + line.hr * 3;
-  const obp = rate(line.h + line.bb, line.pa);
+  const obp = rate(line.h + line.bb + line.hbp, line.ab + line.bb + line.hbp + line.sf);
   const slg = rate(totalBases, line.ab);
   return {
     avg: rate(line.h, line.ab),
@@ -128,6 +141,12 @@ test("small league game sample stays out of extreme run and rate environments", 
       line.triples += batter.triples;
       line.hr += batter.homeRuns;
       line.bb += batter.walks;
+      line.hbp += batter.hitByPitch ?? 0;
+      line.sf += batter.sacrificeFlies ?? 0;
+      line.sh += batter.sacrificeHits ?? 0;
+      line.gidp += batter.groundedIntoDoublePlays ?? 0;
+      line.sb += batter.stolenBases ?? 0;
+      line.cs += batter.caughtStealing ?? 0;
       line.so += batter.strikeouts;
     }
   }

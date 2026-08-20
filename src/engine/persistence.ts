@@ -30,6 +30,7 @@ import type {
   WorldEvent,
 } from "../domain/entities.js";
 import type { EntityId, ISODate } from "../domain/types.js";
+import type { RealWorldSnapshotMetadata } from "../data/real/types.js";
 import { WorldClock } from "./clock.js";
 import { SequentialIdGenerator } from "./ids.js";
 import { Mulberry32Random } from "./rng.js";
@@ -43,6 +44,7 @@ export interface WorldSaveData {
   clock: { currentDate: ISODate };
   rng: { type: "mulberry32"; state: number };
   ids: { type: "sequential"; counters: Record<string, number> };
+  realWorldSnapshot?: RealWorldSnapshotMetadata;
   countries: Country[];
   leagues: League[];
   seasons: Season[];
@@ -84,6 +86,7 @@ export function serializeWorld(world: LeagueWorld): WorldSaveData {
     clock: { currentDate: world.clock.now() },
     rng: { type: "mulberry32", state: readRngState(world.rng) },
     ids: { type: "sequential", counters: readIdState(world.ids) },
+    ...(world.realWorldSnapshot ? { realWorldSnapshot: structuredClone(world.realWorldSnapshot) } : {}),
     countries: values(world.countries),
     leagues: values(world.leagues),
     seasons: values(world.seasons),
@@ -126,6 +129,7 @@ export function deserializeWorld(input: unknown): LeagueWorld {
     Mulberry32Random.fromState(save.rng.state),
     SequentialIdGenerator.fromState(save.ids.counters),
   );
+  if (save.realWorldSnapshot) world.realWorldSnapshot = structuredClone(save.realWorldSnapshot);
   fillMap(world.countries, save.countries);
   fillMap(world.leagues, save.leagues);
   fillMap(world.organizations, save.organizations);
@@ -206,6 +210,7 @@ function withDefaults(save: Partial<WorldSaveData>): WorldSaveData {
     clock: save.clock!,
     rng: save.rng!,
     ids: save.ids!,
+    ...(save.realWorldSnapshot ? { realWorldSnapshot: structuredClone(save.realWorldSnapshot) } : {}),
     countries: save.countries ?? [],
     leagues: save.leagues ?? [],
     seasons: save.seasons ?? [],
@@ -223,12 +228,12 @@ function withDefaults(save: Partial<WorldSaveData>): WorldSaveData {
     drafts: save.drafts ?? [],
     games: save.games ?? [],
     gameRosters: save.gameRosters ?? [],
-    liveGames: save.liveGames ?? [],
-    boxScores: save.boxScores ?? [],
+    liveGames: (save.liveGames ?? []).map(normalizeLiveGame),
+    boxScores: (save.boxScores ?? []).map(normalizeBoxScore),
     accumulatedGameIds: save.accumulatedGameIds ?? [],
-    battingSeasonStats: save.battingSeasonStats ?? [],
+    battingSeasonStats: (save.battingSeasonStats ?? []).map(normalizeBattingSeasonStats),
     pitchingSeasonStats: save.pitchingSeasonStats ?? [],
-    battingGameLogs: save.battingGameLogs ?? [],
+    battingGameLogs: (save.battingGameLogs ?? []).map(normalizeBattingGameLog),
     pitchingGameLogs: save.pitchingGameLogs ?? [],
     milestoneKeys: save.milestoneKeys ?? [],
     pitchingRotations: save.pitchingRotations ?? [],
@@ -238,6 +243,48 @@ function withDefaults(save: Partial<WorldSaveData>): WorldSaveData {
     tradeProposals: save.tradeProposals ?? [],
     postingRequests: save.postingRequests ?? [],
     events: save.events ?? [],
+  };
+}
+
+function normalizeLiveGame(game: LiveGame): LiveGame {
+  const cloned = structuredClone(game);
+  cloned.boxScore = normalizeBoxScore(cloned.boxScore);
+  return cloned;
+}
+
+function normalizeBoxScore(boxScore: BoxScore): BoxScore {
+  const cloned = structuredClone(boxScore);
+  cloned.batters = Object.fromEntries(
+    Object.entries(cloned.batters ?? {}).map(([playerId, line]) => [playerId, normalizeBatterLine(line)]),
+  );
+  return cloned;
+}
+
+function normalizeBattingGameLog(log: PlayerBattingGameLog): PlayerBattingGameLog {
+  return normalizeBatterLine(log) as PlayerBattingGameLog;
+}
+
+function normalizeBatterLine<T extends Partial<PlayerBattingGameLog> & { playerId: EntityId; teamId: EntityId }>(line: T): T {
+  return {
+    ...line,
+    hitByPitch: line.hitByPitch ?? 0,
+    sacrificeFlies: line.sacrificeFlies ?? 0,
+    sacrificeHits: line.sacrificeHits ?? 0,
+    groundedIntoDoublePlays: line.groundedIntoDoublePlays ?? 0,
+    stolenBases: line.stolenBases ?? 0,
+    caughtStealing: line.caughtStealing ?? 0,
+  };
+}
+
+function normalizeBattingSeasonStats(stats: PlayerBattingSeasonStats): PlayerBattingSeasonStats {
+  return {
+    ...stats,
+    hitByPitch: stats.hitByPitch ?? 0,
+    sacrificeFlies: stats.sacrificeFlies ?? 0,
+    sacrificeHits: stats.sacrificeHits ?? 0,
+    groundedIntoDoublePlays: stats.groundedIntoDoublePlays ?? 0,
+    stolenBases: stats.stolenBases ?? 0,
+    caughtStealing: stats.caughtStealing ?? 0,
   };
 }
 

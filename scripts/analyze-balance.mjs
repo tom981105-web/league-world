@@ -23,7 +23,8 @@ function zero() {
     strikeouts: 0,
     extraInningGames: 0,
     homeWins: 0,
-    batting: { pa: 0, ab: 0, h: 0, doubles: 0, triples: 0, hr: 0, bb: 0, so: 0, r: 0, rbi: 0 },
+    errors: 0,
+    batting: { pa: 0, ab: 0, h: 0, doubles: 0, triples: 0, hr: 0, bb: 0, hbp: 0, sf: 0, sh: 0, gidp: 0, sb: 0, cs: 0, so: 0, r: 0, rbi: 0 },
     pitching: { bf: 0, outs: 0, h: 0, r: 0, er: 0, bb: 0, so: 0, hr: 0 },
     starterOuts: 0,
     bullpenOuts: 0,
@@ -36,6 +37,7 @@ function addGame(summary, boxScore) {
   summary.games += 1;
   summary.totalRuns += boxScore.teams.home.runs + boxScore.teams.away.runs;
   summary.hits += boxScore.teams.home.hits + boxScore.teams.away.hits;
+  summary.errors += boxScore.teams.home.errors + boxScore.teams.away.errors;
   summary.extraInningGames += boxScore.teams.home.inningRuns.length > 9 || boxScore.teams.away.inningRuns.length > 9 ? 1 : 0;
   summary.homeWins += boxScore.teams.home.runs > boxScore.teams.away.runs ? 1 : 0;
 
@@ -47,6 +49,12 @@ function addGame(summary, boxScore) {
     summary.batting.triples += line.triples;
     summary.batting.hr += line.homeRuns;
     summary.batting.bb += line.walks;
+    summary.batting.hbp += line.hitByPitch ?? 0;
+    summary.batting.sf += line.sacrificeFlies ?? 0;
+    summary.batting.sh += line.sacrificeHits ?? 0;
+    summary.batting.gidp += line.groundedIntoDoublePlays ?? 0;
+    summary.batting.sb += line.stolenBases ?? 0;
+    summary.batting.cs += line.caughtStealing ?? 0;
     summary.batting.so += line.strikeouts;
     summary.batting.r += line.runs;
     summary.batting.rbi += line.runsBattedIn;
@@ -102,17 +110,24 @@ function finalize(summary, elapsedMs) {
       homeRunsPerGame: round(rate(summary.homeRuns, summary.games)),
       walksPerGame: round(rate(summary.walks, summary.games)),
       strikeoutsPerGame: round(rate(summary.strikeouts, summary.games)),
+      errorsPerGame: round(rate(summary.errors, summary.games)),
       extraInningRate: round(rate(summary.extraInningGames, summary.games), 4),
       homeWinRate: round(rate(summary.homeWins, summary.games), 4),
     },
     batting: {
       avg: round(rate(b.h, b.ab)),
-      obp: round(rate(b.h + b.bb, b.pa)),
+      obp: round(rate(b.h + b.bb + b.hbp, b.ab + b.bb + b.hbp + b.sf)),
       slg: round(rate(bases, b.ab)),
-      ops: round(rate(b.h + b.bb, b.pa) + rate(bases, b.ab)),
+      ops: round(rate(b.h + b.bb + b.hbp, b.ab + b.bb + b.hbp + b.sf) + rate(bases, b.ab)),
       hrPerPa: round(rate(b.hr, b.pa), 4),
       bbPerPa: round(rate(b.bb, b.pa), 4),
+      hbpPerPa: round(rate(b.hbp, b.pa), 4),
       soPerPa: round(rate(b.so, b.pa), 4),
+      gidpPerGame: round(rate(b.gidp, summary.games), 3),
+      sacrificeFliesPerGame: round(rate(b.sf, summary.games), 3),
+      sacrificeHitsPerGame: round(rate(b.sh, summary.games), 3),
+      stealAttemptsPerGame: round(rate(b.sb + b.cs, summary.games), 3),
+      stealSuccessRate: round(rate(b.sb, b.sb + b.cs), 4),
       babipApprox: round(rate(b.h - b.hr, b.ab - b.so - b.hr)),
     },
     pitching: {

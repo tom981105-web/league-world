@@ -16,6 +16,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { createSeedWorld, type SeedWorldResult } from "./seedWorld.js";
+import { realWorldSnapshot2026 } from "../data/real/index.js";
 import { managerTabs, navIcon, pages, type ManagerTab, type Page } from "./navigation.js";
 import {
   createWebSave,
@@ -62,7 +63,7 @@ import type {
 const bullpenRoles: BullpenRole[] = ["CLOSER", "SETUP", "MIDDLE_RELIEF", "LONG_RELIEF", "MOP_UP", "FLEXIBLE"];
 
 export function App() {
-  const [seed, setSeed] = useState(20270403);
+  const [seed, setSeed] = useState(20260401);
   const [bundle, setBundle] = useState<SeedWorldResult | undefined>();
   const [version, setVersion] = useState(0);
   const [page, setPage] = useState<Page>("HOME");
@@ -77,7 +78,7 @@ export function App() {
   const [careerName, setCareerName] = useState("새 감독");
   const [careerNationality, setCareerNationality] = useState("KR");
   const [careerStartMode, setCareerStartMode] = useState<"CLUB" | "UNEMPLOYED">("CLUB");
-  const [careerOrganizationId, setCareerOrganizationId] = useState<EntityId>("org_seoul");
+  const [careerOrganizationId, setCareerOrganizationId] = useState<EntityId>("real_org_kbo_lg");
   const data = useMemo(() => (bundle ? makeViewModel(bundle.world, bundle) : undefined), [bundle, version]);
 
   if (!bundle) {
@@ -375,10 +376,14 @@ function StartScreen({
       <section className="start-grid">
         <Panel title="새 커리어">
           <label className="form-field">감독 이름<input value={careerName} onChange={(event) => setCareerName(event.target.value)} /></label>
-          <label className="form-field">국적<select value={careerNationality} onChange={(event) => setCareerNationality(event.target.value)}><option value="KR">대한민국</option><option value="JP">일본</option><option value="PW">퍼시픽 웨스트</option></select></label>
+          <label className="form-field">데이터베이스<select value="REAL_2026" disabled><option value="REAL_2026">2026 현실 데이터 · 선수 DB 구축 중</option></select></label>
+          <label className="form-field">국적<select value={careerNationality} onChange={(event) => setCareerNationality(event.target.value)}><option value="KR">대한민국</option><option value="JP">일본</option><option value="US">미국</option></select></label>
+          <label className="form-field">국가<select value="country_kr" disabled><option value="country_kr">대한민국 · KBO 우선 지원</option><option value="country_us">미국 · 선수 DB 준비 중</option><option value="country_jp">일본 · 선수 DB 준비 중</option></select></label>
+          <label className="form-field">리그<select value="real_league_kbo" disabled><option value="real_league_kbo">KBO 리그</option></select></label>
           <label className="form-field">시드<input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value))} /></label>
           <label className="form-field">시작 방식<select value={careerStartMode} onChange={(event) => setCareerStartMode(event.target.value as "CLUB" | "UNEMPLOYED")}><option value="CLUB">구단 선택</option><option value="UNEMPLOYED">무직</option></select></label>
-          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}><option value="org_seoul">서울 팰컨스</option><option value="org_busan">부산 타이즈</option><option value="org_incheon">인천 웨이브스</option><option value="org_daejeon">대전 스파크스</option><option value="org_suwon">수원 실즈</option><option value="org_gwangju">광주 선즈</option><option value="org_daegu">대구 메테오스</option><option value="org_ulsan">울산 앵커스</option><option value="org_jeonju">전주 로열스</option><option value="org_changwon">창원 캐넌스</option></select></label>
+          <label className="form-field">시작 구단<select value={careerOrganizationId} disabled={careerStartMode === "UNEMPLOYED"} onChange={(event) => setCareerOrganizationId(event.target.value)}>{realWorldSnapshot2026.organizations.filter((org) => org.primaryLeagueId === "real_league_kbo").map((org) => <option key={org.id} value={org.id}>{org.displayName}</option>)}</select></label>
+          <p className="empty-note">실제 선수 DB는 아직 연결되지 않았습니다. 가짜 선수명을 실제 선수처럼 채우지 않습니다.</p>
         </Panel>
         <Panel title="저장 슬롯">
           <SaveSlotList metas={saveMetas} onLoad={onLoadSlot} />
@@ -1378,6 +1383,9 @@ function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
   const todayGames = [...world.games.values()].filter((game) => game.scheduledDate === world.clock.now());
   const todayUserGames = userTeam ? todayGames.filter((game) => game.homeTeamId === userTeam.id || game.awayTeamId === userTeam.id) : [];
   const todayAiGames = todayGames.filter((game) => !userTeam || (game.homeTeamId !== userTeam.id && game.awayTeamId !== userTeam.id));
+  const prospectOrganizationId = userManager?.currentOrganizationId && world.organizations.has(userManager.currentOrganizationId)
+    ? userManager.currentOrganizationId
+    : [...world.organizations.keys()][0];
   return {
     season,
     userManager,
@@ -1397,11 +1405,13 @@ function makeViewModel(world: LeagueWorld, bundle: SeedWorldResult): ViewModel {
     battingLeaders: season ? world.getBattingLeaders(season.id, "OPS", { limit: 5 }) : [],
     pitchingLeaders: season ? world.getPitchingLeaders(season.id, "ERA", { limit: 5 }) : [],
     events: [...world.events].reverse(),
-    prospects: world.getProspectRankings({ organizationId: userManager?.currentOrganizationId ?? "org_seoul", limit: 30 }).map((entry) => ({
-      ...entry,
-      recommendationLabel: labelRecommendation(scoutingRecommendation(world, entry.playerId, userManager?.currentOrganizationId ?? "org_seoul")),
-    })),
-    teamNames: Object.fromEntries([...world.teams.values()].map((team) => [team.id, localizeEntityName(team.name)])),
+    prospects: prospectOrganizationId
+      ? world.getProspectRankings({ organizationId: prospectOrganizationId, limit: 30 }).map((entry) => ({
+          ...entry,
+          recommendationLabel: labelRecommendation(scoutingRecommendation(world, entry.playerId, prospectOrganizationId)),
+        }))
+      : [],
+    teamNames: Object.fromEntries([...world.teams.values()].map((team) => [team.id, team.displayName ?? localizeEntityName(team.name)])),
     playerStats: Object.fromEntries(players.map((player) => [player.id, statLine(world, player.id, bundle.seasonId)])),
   };
 }
@@ -1513,19 +1523,19 @@ function findRoster(world: LeagueWorld, gameId: EntityId, teamId: EntityId) {
 function teamName(world: LeagueWorld, teamId?: EntityId | null) {
   if (!teamId) return "";
   const team = world.teams.get(teamId);
-  return team ? localizeEntityName(team.name) : teamId;
+  return team ? team.displayName ?? localizeEntityName(team.name) : teamId;
 }
 
 function orgName(world: LeagueWorld, organizationId?: EntityId | null) {
   if (!organizationId) return "";
   const organization = world.organizations.get(organizationId);
-  return organization ? localizeEntityName(organization.name) : organizationId;
+  return organization ? organization.displayName ?? localizeEntityName(organization.name) : organizationId;
 }
 
 function playerName(world: LeagueWorld, playerId?: EntityId | null) {
   if (!playerId) return "";
   const player = world.players.get(playerId);
-  return player ? localizeEntityName(player.name) : "";
+  return player ? player.displayName ?? localizeEntityName(player.name) : "";
 }
 
 function managerName(world: LeagueWorld, managerId?: EntityId | null) {
