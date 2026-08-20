@@ -230,14 +230,15 @@ function seedOrganization(world: LeagueWorld, seed: number, org: SeedOrganizatio
     const id = `${org.id}_bat_${index + 1}`;
     const nationalityCode = foreignSlot(index, orgIndex) ? foreignCodes[(index + orgIndex) % foreignCodes.length]! : "KR";
     const ca = clamp(38 + strength + ((index * 7 + orgIndex) % 18), 25, 86);
-    world.addPlayer(makePlayer(id, generatedName(nationalityCode, seed, org.id, index).name, position, {
+    const player = makePlayer(id, generatedName(nationalityCode, seed, org.id, index).name, position, {
       nationality: countryNameForCode(nationalityCode),
       nationalityCode,
       currentAbility: ca,
       potentialAbility: clamp(ca + 8 + ((index + orgIndex) % 17), 35, 96),
       birthDate: `${1994 + ((index + orgIndex) % 12)}-05-${day(index)}` as ISODate,
-    }));
-    signAndAssign(world, id, org.id, topTeamId, salaryFor(ca, index, strength), index);
+    });
+    seedContractAndRoster(player, org.id, topTeamId, salaryFor(ca, index, strength), index);
+    world.addPlayer(player);
     topPlayers.push(id);
   });
 
@@ -245,37 +246,40 @@ function seedOrganization(world: LeagueWorld, seed: number, org: SeedOrganizatio
     const id = `${org.id}_pit_${index + 1}`;
     const nationalityCode = foreignSlot(index + 3, orgIndex) ? foreignCodes[(index + orgIndex + 2) % foreignCodes.length]! : "KR";
     const ca = clamp(40 + strength + ((index * 5 + orgIndex) % 20), 25, 88);
-    world.addPlayer(makePlayer(id, generatedName(nationalityCode, seed, org.id, index + 30).name, "P", {
+    const player = makePlayer(id, generatedName(nationalityCode, seed, org.id, index + 30).name, "P", {
       nationality: countryNameForCode(nationalityCode),
       nationalityCode,
       currentAbility: ca,
       potentialAbility: clamp(ca + 7 + ((index + orgIndex) % 16), 35, 96),
       birthDate: `${1992 + ((index + orgIndex) % 13)}-03-${day(index)}` as ISODate,
-    }));
-    signAndAssign(world, id, org.id, topTeamId, salaryFor(ca, index + 20, strength), index + 20);
+    });
+    seedContractAndRoster(player, org.id, topTeamId, salaryFor(ca, index + 20, strength), index + 20);
+    world.addPlayer(player);
     topPlayers.push(id);
   }
 
   futuresHitterPool.forEach((position, index) => {
     const id = `${org.id}_fut_bat_${index + 1}`;
     const ca = clamp(27 + Math.floor(strength / 2) + ((index * 3 + orgIndex) % 17), 20, 66);
-    world.addPlayer(makePlayer(id, generatedName("KR", seed, org.id, index + 70).name, position, {
+    const player = makePlayer(id, generatedName("KR", seed, org.id, index + 70).name, position, {
       currentAbility: ca,
       potentialAbility: clamp(ca + 16 + ((index + orgIndex) % 22), 40, 94),
       birthDate: `${2002 + ((index + orgIndex) % 8)}-07-${day(index)}` as ISODate,
-    }));
-    signAndAssign(world, id, org.id, futuresTeamId, salaryFor(ca, index + 50, 0), index + 50);
+    });
+    seedContractAndRoster(player, org.id, futuresTeamId, salaryFor(ca, index + 50, 0), index + 50);
+    world.addPlayer(player);
   });
 
   for (let index = 0; index < futuresPitcherCount; index += 1) {
     const id = `${org.id}_fut_pit_${index + 1}`;
     const ca = clamp(28 + Math.floor(strength / 2) + ((index * 4 + orgIndex) % 17), 20, 68);
-    world.addPlayer(makePlayer(id, generatedName("KR", seed, org.id, index + 100).name, "P", {
+    const player = makePlayer(id, generatedName("KR", seed, org.id, index + 100).name, "P", {
       currentAbility: ca,
       potentialAbility: clamp(ca + 15 + ((index + orgIndex) % 24), 40, 95),
       birthDate: `${2001 + ((index + orgIndex) % 9)}-09-${day(index)}` as ISODate,
-    }));
-    signAndAssign(world, id, org.id, futuresTeamId, salaryFor(ca, index + 80, 0), index + 80);
+    });
+    seedContractAndRoster(player, org.id, futuresTeamId, salaryFor(ca, index + 80, 0), index + 80);
+    world.addPlayer(player);
   }
 
   world.setPitchingRotation(topTeamId, topPlayers.filter((id) => id.includes("_pit_")).slice(0, 5));
@@ -457,11 +461,37 @@ function makePlayer(id: EntityId, name: string, position: BaseballPosition, over
   };
 }
 
-function signAndAssign(world: LeagueWorld, playerId: EntityId, organizationId: EntityId, teamId: EntityId, salary: number, index: number): void {
+function seedContractAndRoster(player: Player, organizationId: EntityId, teamId: EntityId, salary: number, index: number): void {
   const startYear = index % 5 === 0 ? 2026 : 2027;
   const endYear = index % 7 === 0 ? 2027 : 2027 + (index % 4);
-  world.registerContract({ playerId, organizationId, startDate: `${startYear}-01-01`, endDate: `${endYear}-12-31`, salary, currency: "KRW", ...(index % 6 === 0 ? { signingBonus: Math.floor(salary * 0.2) } : {}), contractStatus: "ACTIVE" });
-  world.assignPlayerToRoster(playerId, teamId, "ACTIVE", "시드 로스터 배정");
+  const assignmentId = `assign_seed_${player.id}`;
+  player.status = "PROFESSIONAL";
+  player.currentOrganizationId = organizationId;
+  player.currentTeamId = teamId;
+  player.rosterStatus = "ACTIVE";
+  player.currentRosterAssignmentId = assignmentId;
+  player.firstProfessionalDate = `${startYear}-01-01` as ISODate;
+  player.contracts.push({
+    id: `contract_seed_${player.id}`,
+    playerId: player.id,
+    organizationId,
+    startDate: `${startYear}-01-01` as ISODate,
+    endDate: `${endYear}-12-31` as ISODate,
+    years: endYear - startYear + 1,
+    salary,
+    currency: "KRW",
+    ...(index % 6 === 0 ? { signingBonus: Math.floor(salary * 0.2) } : { signingBonus: 0 }),
+    contractStatus: "ACTIVE",
+  });
+  player.rosterAssignments.push({
+    id: assignmentId,
+    playerId: player.id,
+    organizationId,
+    teamId,
+    rosterStatus: "ACTIVE",
+    startDate: "2027-04-03",
+    reason: "시드 로스터 배정",
+  });
 }
 
 function generatedName(code: NameCountryCode, seed: number, scope: EntityId, index: number) {
